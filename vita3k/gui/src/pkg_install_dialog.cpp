@@ -49,9 +49,24 @@ void draw_pkg_install_dialog(GuiState &gui, EmuEnvState &emuenv) {
     if (draw_file_dialog) {
         result = host::dialog::filesystem::open_file(pkg_path, { { "PlayStation Store Downloaded Package", { "pkg" } } });
         draw_file_dialog = false;
-        if (result == host::dialog::filesystem::Result::SUCCESS)
+        if (result == host::dialog::filesystem::Result::SUCCESS) {
+            fs::ifstream infile(pkg_path.string(), std::ios::binary);
+            PkgHeader pkg_header{};
+            infile.read(reinterpret_cast<char *>(&pkg_header), sizeof(PkgHeader));
+            infile.seekg(sizeof(PkgHeader));
+            std::string title_id_str(pkg_header.content_id);
+            std::string title_id = title_id_str.substr(7, 9);
+            const auto work_path{ fs::path(emuenv.pref_path) / fmt::format("ux0/license/{}/{}.rif", title_id, pkg_header.content_id) };
+            if (fs::exists(work_path)) {
+                LOG_INFO("Found work file: {}", work_path.string());
+                fs::ifstream binfile(work_path.wstring(), std::ios::in | std::ios::binary | std::ios::ate);
+                zRIF = rif2zrif(binfile);
+                ImGui::OpenPopup("install");
+                gui::state = "install";
+            } else {
             ImGui::OpenPopup("install");
-        else if (result == host::dialog::filesystem::Result::CANCEL) {
+			}
+        } else if (result == host::dialog::filesystem::Result::CANCEL) {
             gui.file_menu.pkg_install_dialog = false;
             draw_file_dialog = true;
         } else {
