@@ -1,5 +1,6 @@
 include(${CMAKE_ROOT}/Modules/ExternalProject.cmake)
 
+#for test
 # Make option() in all external projects do nothing when a normal variable of the
 # same name exists. The normal variable is not removed. The cache entry is not
 # created or updated and is ignored if it exists.
