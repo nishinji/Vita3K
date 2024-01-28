@@ -15,16 +15,27 @@
 // with this program; if not, write to the Free Software Foundation, Inc.,
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
-#pragma once
+#version 450
+#extension GL_GOOGLE_include_directive : require
 
-#include <glutil/object.h>
-#include <util/fs.h>
+layout(push_constant) uniform constants {
+    vec4 rt_metrics; // 1/w, 1/h, w, h
+} pc;
 
-#include <string_view>
+#define SMAA_RT_METRICS pc.rt_metrics
+#define SMAA_GLSL_4 1
+#define SMAA_PRESET_HIGH 1
+#define SMAA_INCLUDE_VS 0
+#include "../SMAA.hlsl"
 
-namespace gl {
-// the preludes are inserted between the #version line and the shader file, which is
-// where #define and #include-like shared sources have to go
-UniqueGLObject load_shaders(const fs::path &vertex_file_path, const fs::path &fragment_file_path,
-    std::string_view vertex_prelude = "", std::string_view fragment_prelude = "");
-} // namespace gl
+layout(location = 0) in vec2 uv_frag;
+layout(location = 1) in vec4 offset_frag;
+
+layout(binding = 0) uniform sampler2D color_tex;
+layout(binding = 1) uniform sampler2D blend_tex;
+
+layout(location = 0) out vec4 color_out;
+
+void main() {
+    color_out = SMAANeighborhoodBlendingPS(uv_frag, offset_frag, color_tex, blend_tex);
+}
