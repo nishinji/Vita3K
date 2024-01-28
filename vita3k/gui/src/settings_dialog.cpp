@@ -654,6 +654,7 @@ void draw_settings_dialog(GuiState &gui, EmuEnvState &emuenv) {
             lang.gpu["bilinear"].c_str(),
             lang.gpu["bicubic"].c_str(),
             "FXAA",
+            "SMAA",
             "FSR"
         };
         const int filters_available = emuenv.renderer->get_supported_filters();
