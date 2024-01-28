@@ -584,6 +584,8 @@ void ScreenRenderer::set_filter(const std::string_view &filter) {
     this->filter.reset();
     if (filter == "FSR")
         this->filter = std::make_unique<FSRScreenFilter>(*this);
+    else if (filter == "SMAA")
+        this->filter = std::make_unique<SMAAScreenFilter>(*this);
     else if (filter == "FXAA")
         this->filter = std::make_unique<FXAAScreenFilter>(*this);
     else if (filter == "Bicubic")
@@ -593,7 +595,11 @@ void ScreenRenderer::set_filter(const std::string_view &filter) {
     else
         this->filter = std::make_unique<BilinearScreenFilter>(*this);
 
-    this->filter->init();
+    if (!this->filter->init()) {
+        LOG_ERROR("{} could not be set up, falling back to bilinear", filter);
+        this->filter = std::make_unique<BilinearScreenFilter>(*this);
+        this->filter->init();
+    }
 }
 
 void ScreenRenderer::create_layout_sync() {

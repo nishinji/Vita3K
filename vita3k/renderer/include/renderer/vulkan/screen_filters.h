@@ -34,7 +34,8 @@ protected:
 public:
     ScreenFilter(ScreenRenderer &screen_renderer);
     virtual ~ScreenFilter() = default;
-    virtual void init() = 0;
+    // returns false when the filter could not be set up, the renderer then falls back to bilinear
+    virtual bool init() = 0;
     virtual void on_resize() {};
     virtual void render(bool is_pre_renderpass, vk::ImageView src_img, vk::ImageLayout src_layout, const Viewport &viewport) = 0;
     virtual std::string_view get_name() = 0;
@@ -72,7 +73,7 @@ protected:
 public:
     SinglePassScreenFilter(ScreenRenderer &screen);
     ~SinglePassScreenFilter();
-    void init() override;
+    bool init() override;
     void render(bool is_pre_renderpass, vk::ImageView src_img, vk::ImageLayout src_layout, const Viewport &viewport) override;
 };
 
@@ -132,6 +133,83 @@ public:
     }
 };
 
+class SMAAScreenFilter : public ScreenFilter {
+private:
+    // offscreen render targets, one (edges, blend, resolve) set per swapchain image,
+    // sized to the source texture resolution (lazily (re)created)
+    std::vector<vkutil::Image> edges_images;
+    std::vector<vkutil::Image> blend_images;
+    std::vector<vkutil::Image> resolve_images;
+    std::vector<vk::Framebuffer> edges_framebuffers;
+    std::vector<vk::Framebuffer> blend_framebuffers;
+    std::vector<vk::Framebuffer> resolve_framebuffers;
+    // per image, because only the acquired image's previous frame is known to be finished
+    std::vector<vk::Extent2D> target_extents;
+
+    // precomputed SMAA lookup tables (shared, read-only)
+    vkutil::Image area_tex;
+    vkutil::Image search_tex;
+
+    // render pass used by the three SMAA passes (one RGBA8 color attachment)
+    vk::RenderPass offscreen_render_pass;
+
+    // one SPIR-V module per stage, all compiled from SMAA.hlsl
+    vk::ShaderModule edge_vertex_shader;
+    vk::ShaderModule edge_fragment_shader;
+    vk::ShaderModule blend_vertex_shader;
+    vk::ShaderModule blend_fragment_shader;
+    vk::ShaderModule neighborhood_vertex_shader;
+    vk::ShaderModule neighborhood_fragment_shader;
+    // plain copy of the resolved image to the screen
+    vk::ShaderModule present_vertex_shader;
+    vk::ShaderModule present_fragment_shader;
+
+    vk::DescriptorSetLayout edge_set_layout;
+    vk::DescriptorSetLayout blend_set_layout;
+    vk::DescriptorSetLayout neighborhood_set_layout;
+    vk::DescriptorPool descriptor_pool;
+    std::vector<vk::DescriptorSet> edge_sets; // per swapchain image
+    std::vector<vk::DescriptorSet> blend_sets;
+    std::vector<vk::DescriptorSet> neighborhood_sets;
+    std::vector<vk::DescriptorSet> present_sets;
+
+    vk::PipelineLayout edge_pipeline_layout;
+    vk::PipelineLayout blend_pipeline_layout;
+    vk::PipelineLayout neighborhood_pipeline_layout;
+    vk::Pipeline edge_pipeline;
+    vk::Pipeline blend_pipeline;
+    vk::Pipeline neighborhood_pipeline;
+    vk::Pipeline present_pipeline;
+
+    vk::Sampler linear_sampler;
+    vk::Sampler point_sampler;
+
+    // host-visible quad buffer (swapchain_size * 2 quads)
+    vkutil::Buffer vao;
+
+    void create_samplers();
+    void create_render_pass();
+    bool load_shaders();
+    void create_lut_textures();
+    void create_descriptors();
+    bool create_pipelines();
+    vk::Pipeline build_pipeline(vk::ShaderModule vertex_shader, vk::ShaderModule fragment_shader,
+        vk::PipelineLayout layout, vk::RenderPass render_pass);
+    void ensure_targets(uint32_t idx, uint32_t width, uint32_t height);
+    void destroy_targets(uint32_t idx);
+    void bind_fullscreen_quad(vk::CommandBuffer cmd, bool sub_region, const Viewport &viewport);
+
+public:
+    SMAAScreenFilter(ScreenRenderer &screen_renderer)
+        : ScreenFilter(screen_renderer) {}
+    ~SMAAScreenFilter();
+    bool init() override;
+    void render(bool is_pre_renderpass, vk::ImageView src_img, vk::ImageLayout src_layout, const Viewport &viewport) override;
+    std::string_view get_name() override {
+        return "SMAA";
+    }
+};
+
 class FSRScreenFilter : public ScreenFilter {
 private:
     // dst of the easu shader, src of the rcas shader
@@ -157,7 +235,7 @@ public:
     FSRScreenFilter(ScreenRenderer &screen_renderer)
         : ScreenFilter(screen_renderer) {}
     ~FSRScreenFilter();
-    void init() override;
+    bool init() override;
     void on_resize() override;
     void render(bool is_pre_renderpass, vk::ImageView src_img, vk::ImageLayout src_layout, const Viewport &viewport) override;
     std::string_view get_name() override {
