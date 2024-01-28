@@ -15,16 +15,22 @@
 // with this program; if not, write to the Free Software Foundation, Inc.,
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
-#pragma once
+// SMAA pass 2: blending weight calculation.
+// The SMAA.hlsl library and the rt_metrics uniform are injected as a prelude by
+// ScreenRenderer::init_smaa.
 
-#include <glutil/object.h>
-#include <util/fs.h>
+uniform sampler2D edges_tex;
+uniform sampler2D area_tex;
+uniform sampler2D search_tex;
 
-#include <string_view>
+in vec2 uv_frag;
+in vec2 pixcoord_frag;
+in vec4 offset_frag[3];
 
-namespace gl {
-// the preludes are inserted between the #version line and the shader file, which is
-// where #define and #include-like shared sources have to go
-UniqueGLObject load_shaders(const fs::path &vertex_file_path, const fs::path &fragment_file_path,
-    std::string_view vertex_prelude = "", std::string_view fragment_prelude = "");
-} // namespace gl
+out vec4 color_frag;
+
+void main() {
+    // subsample indices are always zero for SMAA 1x
+    color_frag = SMAABlendingWeightCalculationPS(uv_frag, pixcoord_frag, offset_frag,
+        edges_tex, area_tex, search_tex, vec4(0.0));
+}
