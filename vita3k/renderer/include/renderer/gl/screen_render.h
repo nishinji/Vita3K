@@ -23,6 +23,12 @@
 
 namespace renderer::gl {
 
+enum class ScreenFilter {
+    NONE,
+    FXAA,
+    SMAA,
+};
+
 class ScreenRenderer {
 public:
     ScreenRenderer() = default;
@@ -39,7 +45,7 @@ public:
         return m_screen_texture;
     }
 
-    bool enable_fxaa;
+    void set_filter(ScreenFilter new_filter);
 
 private:
     struct screen_vertex {
@@ -52,6 +58,17 @@ private:
 
     using screen_vertices_t = screen_vertex[screen_vertex_count];
 
+    // compiles the three SMAA programs and uploads the precomputed lookup tables,
+    // returns false (and leaves SMAA unusable) if anything went wrong
+    bool init_smaa(const fs::path &static_assets);
+    // (re)creates the offscreen edges/blend targets when the source resolution changes
+    void resize_smaa_targets(GLsizei width, GLsizei height);
+    // runs the edge detection and blending weight passes into the offscreen targets
+    void render_smaa_offscreen(GLuint texture, const SceFVector2 &texture_size);
+    void setup_vertex_attributes(GLuint program);
+
+    ScreenFilter m_filter = ScreenFilter::NONE;
+
     GLuint m_vao{ 0 };
     GLuint m_vbo{ 0 };
     SharedGLObject m_render_shader_nofilter;
@@ -59,6 +76,22 @@ private:
     GLuint m_screen_texture{ 0 };
 
     float last_uvs[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
+
+    // SMAA: two offscreen passes at the source resolution followed by a screen pass
+    SharedGLObject m_smaa_shader_edge;
+    SharedGLObject m_smaa_shader_blend;
+    SharedGLObject m_smaa_shader_neighborhood;
+    // full source quad (uv 0..1), used by the two offscreen passes
+    GLuint m_smaa_vao{ 0 };
+    GLuint m_smaa_vbo{ 0 };
+    GLuint m_smaa_area_texture{ 0 };
+    GLuint m_smaa_search_texture{ 0 };
+    GLuint m_smaa_edges_texture{ 0 };
+    GLuint m_smaa_blend_texture{ 0 };
+    GLuint m_smaa_edges_fbo{ 0 };
+    GLuint m_smaa_blend_fbo{ 0 };
+    GLsizei m_smaa_width{ 0 };
+    GLsizei m_smaa_height{ 0 };
 };
 
 } // namespace renderer::gl

@@ -15,16 +15,27 @@
 // with this program; if not, write to the Free Software Foundation, Inc.,
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
-#pragma once
+#version 450
+#extension GL_GOOGLE_include_directive : require
 
-#include <glutil/object.h>
-#include <util/fs.h>
+layout(location = 0) in vec3 position_vertex;
+layout(location = 1) in vec2 uv_vertex;
 
-#include <string_view>
+layout(push_constant) uniform constants {
+    vec4 rt_metrics; // 1/w, 1/h, w, h
+} pc;
 
-namespace gl {
-// the preludes are inserted between the #version line and the shader file, which is
-// where #define and #include-like shared sources have to go
-UniqueGLObject load_shaders(const fs::path &vertex_file_path, const fs::path &fragment_file_path,
-    std::string_view vertex_prelude = "", std::string_view fragment_prelude = "");
-} // namespace gl
+#define SMAA_RT_METRICS pc.rt_metrics
+#define SMAA_GLSL_4 1
+#define SMAA_PRESET_HIGH 1
+#define SMAA_INCLUDE_PS 0
+#include "../SMAA.hlsl"
+
+layout(location = 0) out vec2 uv_frag;
+layout(location = 1) out vec4 offset_frag;
+
+void main() {
+    gl_Position = vec4(position_vertex, 1.0);
+    uv_frag = uv_vertex;
+    SMAANeighborhoodBlendingVS(uv_vertex, offset_frag);
+}

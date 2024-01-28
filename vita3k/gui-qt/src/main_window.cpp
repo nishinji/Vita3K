@@ -1846,9 +1846,9 @@ void MainWindow::setup_status_bar() {
     auto get_filter_names = [this]() -> QStringList {
         if (emuenv.cfg.current_config.backend_renderer == "Vulkan")
             return { QStringLiteral("Nearest"), QStringLiteral("Bilinear"),
-                QStringLiteral("Bicubic"), QStringLiteral("FXAA"), QStringLiteral("FSR") };
+                QStringLiteral("Bicubic"), QStringLiteral("FXAA"), QStringLiteral("SMAA"), QStringLiteral("FSR") };
         else
-            return { QStringLiteral("Bilinear"), QStringLiteral("FXAA") };
+            return { QStringLiteral("Bilinear"), QStringLiteral("FXAA"), QStringLiteral("SMAA") };
     };
 
     auto apply_screen_filter = [this](const std::string &filter) {
@@ -2023,8 +2023,8 @@ void MainWindow::update_screen_filter_button() {
     auto &cc = emuenv.cfg.current_config;
     const QStringList valid = (cc.backend_renderer == "Vulkan")
         ? QStringList{ QStringLiteral("Nearest"), QStringLiteral("Bilinear"),
-              QStringLiteral("Bicubic"), QStringLiteral("FXAA"), QStringLiteral("FSR") }
-        : QStringList{ QStringLiteral("Bilinear"), QStringLiteral("FXAA") };
+              QStringLiteral("Bicubic"), QStringLiteral("FXAA"), QStringLiteral("SMAA"), QStringLiteral("FSR") }
+        : QStringList{ QStringLiteral("Bilinear"), QStringLiteral("FXAA"), QStringLiteral("SMAA") };
 
     const QString current = QString::fromStdString(cc.screen_filter);
     if (!valid.contains(current)) {

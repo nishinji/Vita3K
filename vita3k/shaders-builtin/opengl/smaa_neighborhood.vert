@@ -15,16 +15,18 @@
 // with this program; if not, write to the Free Software Foundation, Inc.,
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
-#pragma once
+// SMAA pass 3: neighborhood blending, drawn straight to the screen.
+// The SMAA.hlsl library and the rt_metrics uniform are injected as a prelude by
+// ScreenRenderer::init_smaa.
 
-#include <glutil/object.h>
-#include <util/fs.h>
+in vec3 position_vertex;
+in vec2 uv_vertex;
 
-#include <string_view>
+out vec2 uv_frag;
+out vec4 offset_frag;
 
-namespace gl {
-// the preludes are inserted between the #version line and the shader file, which is
-// where #define and #include-like shared sources have to go
-UniqueGLObject load_shaders(const fs::path &vertex_file_path, const fs::path &fragment_file_path,
-    std::string_view vertex_prelude = "", std::string_view fragment_prelude = "");
-} // namespace gl
+void main() {
+    gl_Position = vec4(position_vertex, 1.0);
+    uv_frag = uv_vertex;
+    SMAANeighborhoodBlendingVS(uv_vertex, offset_frag);
+}
