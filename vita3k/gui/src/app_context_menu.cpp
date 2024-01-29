@@ -356,19 +356,50 @@ void draw_app_context_menu(GuiState &gui, EmuEnvState &emuenv, const std::string
                     ImGui::Spacing();
                     ImGui::Separator();
                     ImGui::Spacing();
+
+                    // Create body of state report
+                    // Create App summary
+                    const auto app_summary = fmt::format(
+                        "# App summary\n- App name: {}\n- App serial: {}\n- App version: {}\n",
+                        APP_INDEX->title, title_id, APP_INDEX->app_ver);
+
+                    // Create Vita3K summary
+                    const auto vita3k_summary = fmt::format(
+                        "# Vita3K summary\n- Version: {}\n- Build number: {}\n- Commit hash: https://github.com/vita3k/vita3k/commit/{}\n- CPU backend: {}\n- GPU backend: {}\n",
+                        app_version, app_number, app_hash, get_cpu_backend(gui, emuenv, app_path), emuenv.cfg.backend_renderer);
+
+#ifdef WIN32
+                    const auto user = std::getenv("USERNAME");
+#else
+                    auto user = std::getenv("USER");
+#endif // WIN32
+
+                    // Create Test environment summary
+                    const auto test_env_summary = fmt::format(
+                        "# Test environment summary\n- Tested by: {} <!-- Change your username if is needed -->\n- OS: Windows 10/macOS/Linux Distro, Kernel Version?\n- CPU: AMD/Intel?\n- GPU: AMD/NVIDIA/Intel?\n- RAM: {} GB\n",
+                        user ? user : "?", SDL_GetSystemRAM() / 1000);
+
+                    const auto rest_of_body = "# Issues\n<!-- Summary of problems -->\n\n# Screenshots\n![image](https://?)\n\n# Log\n\n# Recommended labels\n<!-- See https://github.com/Vita3K/compatibility/labels -->\n- A?\n- B?\n- C?";
+
                     if (has_state_report) {
                         const auto copy_vita3k_summary = [&]() {
-                            const auto vita3k_summary = fmt::format(
-                                "# Vita3K summary\n- Version: {}\n- Build number: {}\n- Commit hash: https://github.com/vita3k/vita3k/commit/{}\n- CPU backend: {}\n- GPU backend: {}",
-                                app_version, app_number, app_hash, get_cpu_backend(gui, emuenv, app_path), emuenv.cfg.backend_renderer);
                             ImGui::LogToClipboard();
                             ImGui::LogText("%s", vita3k_summary.c_str());
                             ImGui::LogFinish();
                         };
+                        const auto copy_state_report = [&]() {
+                            const auto state_report = fmt::format(
+                                "{}\n{}\n{}\n{}\n",
+                                app_summary, vita3k_summary, test_env_summary, rest_of_body);
+                            ImGui::LogToClipboard();
+                            ImGui::LogText("%s", state_report.c_str());
+                            ImGui::LogFinish();
+                        };
                         if (ImGui::MenuItem(lang.main["copy_vita3k_summary"].c_str()))
                             copy_vita3k_summary();
+                        if (ImGui::MenuItem(lang.main["copy_state_report"].c_str())) 
+                            copy_state_report();
                         if (ImGui::MenuItem(lang.main["open_state_report"].c_str())) {
-                            copy_vita3k_summary();
                             open_path(fmt::format("{}/{}", ISSUES_URL, gui.compat.app_compat_db[title_id].issue_id));
                         }
                     } else {
