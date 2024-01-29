@@ -153,6 +153,7 @@ struct LangState {
         std::map<std::string, std::string> main = {
             { "check_app_state", "Check App state" },
             { "copy_vita3k_summary", "Copy Vita3K Summary" },
+            { "copy_state_report", "Copy state report" },
             { "open_state_report", "Open state report" },
             { "create_state_report", "Create state report" },
             { "update_database", "Update database" },
