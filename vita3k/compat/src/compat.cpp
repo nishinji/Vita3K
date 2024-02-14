@@ -132,6 +132,7 @@ bool update_app_compat_db(GuiState &gui, EmuEnvState &emuenv) {
     gui.info_message.function = SPDLOG_FUNCTION;
 
     auto &lang = gui.lang.compat_db;
+    gui.compat.compat_db_loaded = load_app_compat_db(gui, emuenv);
 
     // Get current date of last compat database updated at
     const auto updated_at = net_utils::get_web_regex_result(latest_link, std::regex("Updated at: (\\d{2}-\\d{2}-\\d{4} \\d{2}:\\d{2}:\\d{2})"));
