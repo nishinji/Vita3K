@@ -17,6 +17,7 @@
 
 #include "private.h"
 
+#include <config/functions.h>
 #include <gui/functions.h>
 
 #include <gui/imgui_impl_sdl.h>
@@ -48,6 +49,7 @@
 namespace gui {
 
 void draw_info_message(GuiState &gui, EmuEnvState &emuenv) {
+    static bool show_next_time = true;
     if (emuenv.io.title_id.empty() && emuenv.cfg.display_info_message) {
         const ImVec2 display_size(emuenv.viewport_size.x, emuenv.viewport_size.y);
         const ImVec2 RES_SCALE(display_size.x / emuenv.res_width_dpi_scale, display_size.y / emuenv.res_height_dpi_scale);
@@ -74,9 +76,15 @@ void draw_info_message(GuiState &gui, EmuEnvState &emuenv) {
         ImGui::TextWrapped("%s", gui.info_message.msg.c_str());
         ImGui::SetCursorPosY(WINDOW_SIZE.y - BUTTON_SIZE.y - (42.0f * SCALE.y));
         ImGui::Separator();
+        ImGui::Spacing();
+        if (ImGui::Checkbox("Show Next Time", &show_next_time))
+            ImGui::SameLine();
         ImGui::SetCursorPos(ImVec2((ImGui::GetWindowWidth() / 2.f) - (BUTTON_SIZE.x / 2.f), WINDOW_SIZE.y - BUTTON_SIZE.y - (24.0f * SCALE.y)));
-        if (ImGui::Button(emuenv.common_dialog.lang.common["ok"].c_str(), BUTTON_SIZE) || ImGui::IsKeyPressed(static_cast<ImGuiKey>(emuenv.cfg.keyboard_button_cross)))
+        if (ImGui::Button(emuenv.common_dialog.lang.common["ok"].c_str(), BUTTON_SIZE) || ImGui::IsKeyPressed(static_cast<ImGuiKey>(emuenv.cfg.keyboard_button_cross))) {
             gui.info_message = {};
+            emuenv.cfg.display_info_message = show_next_time;
+            config::serialize_config(emuenv.cfg, emuenv.cfg.config_path);
+        }
         ImGui::EndChild();
 
         ImGui::PopStyleVar();

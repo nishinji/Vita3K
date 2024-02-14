@@ -168,7 +168,7 @@ void draw_manual(GuiState &gui, EmuEnvState &emuenv) {
     ImGui::SetWindowFontScale(RES_SCALE.x);
 
     // Hide button when right click is pressed on mouse
-    if (!ImGui::IsAnyItemHovered() && ImGui::IsMouseClicked(0))
+    if (!ImGui::IsAnyItemHovered() && ImGui::IsMouseClicked(1))
         hidden_button = !hidden_button;
 
     // Set button size
@@ -191,7 +191,7 @@ void draw_manual(GuiState &gui, EmuEnvState &emuenv) {
     // Draw left button
     if (current_page > 0) {
         ImGui::SetCursorPos(ImVec2(5.0f * SCALE.x, display_size.y - (40.0f * SCALE.y)));
-        if ((!hidden_button && ImGui::Button("<", BUTTON_SIZE)) || ImGui::IsKeyPressed(static_cast<ImGuiKey>(emuenv.cfg.keyboard_leftstick_left))) {
+        if ((!hidden_button && ImGui::Button("<", BUTTON_SIZE)) || ImGui::IsKeyPressed(static_cast<ImGuiKey>(emuenv.cfg.keyboard_leftstick_left)) || !max_scroll && wheel_counter == -1) {
             --current_page;
             scroll = 0.f;
         }
@@ -225,7 +225,7 @@ void draw_manual(GuiState &gui, EmuEnvState &emuenv) {
     // Draw right button
     if (current_page < (int)gui.manuals.size() - 1) {
         ImGui::SetCursorPos(ImVec2(display_size.x - (70.f * SCALE.x), display_size.y - (40.0f * SCALE.y)));
-        if ((!hidden_button && ImGui::Button(">", BUTTON_SIZE)) || ImGui::IsKeyPressed(static_cast<ImGuiKey>(emuenv.cfg.keyboard_leftstick_right))) {
+        if ((!hidden_button && ImGui::Button(">", BUTTON_SIZE)) || ImGui::IsKeyPressed(static_cast<ImGuiKey>(emuenv.cfg.keyboard_leftstick_right)) || !max_scroll && wheel_counter == -1) {
             scroll = 0.f;
             ++current_page;
         }
