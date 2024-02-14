@@ -107,6 +107,7 @@ public:
     bool fullscreen = false;
     bool console = false;
     bool load_app_list = false;
+    bool disable_motion = false;
 
     fs::path get_pref_path() const {
         return fs_utils::utf8_to_path(pref_path);
