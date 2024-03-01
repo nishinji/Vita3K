@@ -199,7 +199,7 @@ jobs:
       - name: Get Build Variable
         run: echo "Build_Variable=${{ needs.build.outputs.BuildTag }}" >> $GITHUB_ENV
 
-      - name: Upload
+      - name: Create Tag and Release
         shell: bash
         run: |
           mkdir artifacts/
@@ -228,7 +228,8 @@ jobs:
           ls -al artifacts/
           wget -c https://github.com/tcnksm/ghr/releases/download/v0.14.0/ghr_v0.14.0_linux_amd64.tar.gz
           tar xfv ghr_v0.14.0_linux_amd64.tar.gz
-          ghr_v0.14.0_linux_amd64/ghr -u Vita3K -r Vita3K -recreate -n 'Automatic CI builds' -b "$(printf "Corresponding commit: ${{ github.sha }}\nVita3K Build: ${{ env.Build_Variable }}")" continuous artifacts/
+          commit_message=$(git log --format=%B -n 1 ${{ github.sha }})
+          commit_author=$(git log -n 1 --pretty=format:'%an' ${{ github.sha }})
+          ghr_v0.14.0_linux_amd64/ghr -u ${{ github.repository_owner }} -r Vita3K -n "Automatic CI builds: ${{ env.Build_Variable }}" -b "$(printf "Corresponding commit: [$commit_message](https://github.com/${{ github.repository_owner }}/Vita3K/commit/${{ github.sha }}) by $commit_author")" ${{ env.Build_Variable }} artifacts/
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
