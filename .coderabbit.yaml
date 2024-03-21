@@ -1,0 +1,15 @@
+reviews:
+  high_level_summary: false
+  poem: false
+  review_status: false
+  collapse_walkthrough: false
+  path_filters:
+    - "!**/.xml"
+  auto_review:
+    enabled: true
+    ignore_title_keywords:
+      - "WIP"
+      - "DO NOT MERGE"
+    drafts: false
+chat:
+  auto_reply: true
