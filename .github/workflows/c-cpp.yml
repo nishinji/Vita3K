@@ -229,7 +229,7 @@ jobs:
 
       - name: Create release
         # if: github.ref == 'refs/heads/master'
-        uses: "nishinji/action-automatic-releases@latest"
+        uses: "mathieucarbou/action-automatic-releases@latest"
         with:
           repo_token: "${{ secrets.GITHUB_TOKEN }}"
           automatic_release_tag: "v0.2.0-${{ env.Build_Variable }}"
