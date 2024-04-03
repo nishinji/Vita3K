@@ -153,7 +153,8 @@ static void init_style(EmuEnvState &emuenv) {
 static void init_font(GuiState &gui, EmuEnvState &emuenv) {
     // https://github.com/ocornut/imgui/blob/master/docs/FONTS.md
     ImGuiIO &io = ImGui::GetIO();
-    const float font_scale = 3.0f;
+    // const float font_scale = 1.0f;
+    const auto font_scale = emuenv.cfg.hidpifont ? 3.0f : 1.0f;
 
     ImFontConfig mono_font_config{};
     mono_font_config.SizePixels = 13.f * font_scale;

@@ -666,6 +666,7 @@ void draw_settings_dialog(GuiState &gui, EmuEnvState &emuenv) {
         ImGui::Spacing();
 
         // Resolution Upscaling
+        constexpr std::array <const float, 13> ALLOWED_RESOLUTION_MULTIPLIER = { 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f };
         ImGui::SetCursorPosX((ImGui::GetWindowWidth() / 2.f) - (ImGui::CalcTextSize(lang.gpu["internal_resolution_upscaling"].c_str()).x / 2.f));
         ImGui::TextColored(GUI_COLOR_TEXT_TITLE, "%s", lang.gpu["internal_resolution_upscaling"].c_str());
         ImGui::Spacing();
@@ -997,6 +998,10 @@ void draw_settings_dialog(GuiState &gui, EmuEnvState &emuenv) {
                 open_path("https://bit.ly/2P2rb0r");
             SetTooltipEx(lang.gui["firmware_font_package_description"].c_str());
         }
+        ImGui::SameLine();
+        ImGui::Checkbox("HiDPI font", &emuenv.cfg.hidpifont);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s", "hidpi font scaling.");
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Spacing();

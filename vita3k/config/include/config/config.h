@@ -140,6 +140,7 @@ enum PerfomanceOverleyPosition {
     code(bool, "show-welcome", true, show_welcome)                                                      \
     code(bool, "check-for-updates", true, check_for_updates)                                            \
     code(bool, "asia-font-support", false, asia_font_support)                                           \
+    code(bool, "hidpifont", false, hidpifont)                                                           \
     code(bool, "shader-cache", true, shader_cache)                                                      \
     code(bool, "spirv-shader", false, spirv_shader)                                                     \
     code(bool, "fps-hack", false, fps_hack)                                                             \
