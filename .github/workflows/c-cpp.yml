@@ -1,6 +1,15 @@
 name: C/C++ CI
 
-on: [push, pull_request]
+on:
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - '.github/ISSUE_TEMPLATE/*'
+  push:
+    paths-ignore:
+      - '**.md'
+      - '.github/ISSUE_TEMPLATE/*'
+  workflow_dispatch:
 
 jobs:
   format-check:
@@ -31,7 +40,7 @@ jobs:
           - os: ubuntu-latest
             version: zip
             cache_path: ~/.ccache
-            extra_cmake_args: 
+            # extra_cmake_args: 
             cmake_preset: linux-ninja-clang15
           - os: windows-latest
             version: zip
@@ -219,8 +228,10 @@ jobs:
                   echo "Compressing $f"
                   (cd $(basename $f) && zip -r ../artifacts/$(basename $f  | cut -d "-" -f 4)-latest.zip *)
                 fi
-              else
+              else # windows
                 echo "Compressing $f"
+                7z a -mx=9 $(basename $f).7z ./$(basename $f)/*
+                cp $(basename $f).7z artifacts/windows-latest.7z
                 (cd $(basename $f) && zip -r ../artifacts/$(basename $f  | cut -d "-" -f 4)-latest.zip *)
               fi
             fi
@@ -231,4 +242,3 @@ jobs:
           ghr_v0.14.0_linux_amd64/ghr -u Vita3K -r Vita3K -recreate -n 'Automatic CI builds' -b "$(printf "Corresponding commit: ${{ github.sha }}\nVita3K Build: ${{ env.Build_Variable }}")" continuous artifacts/
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-

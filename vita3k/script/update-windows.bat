@@ -13,58 +13,120 @@ if exist Vita3K.exe (
 )
 set boot=0
 
-if not exist vita3k-latest.zip (
-   echo Checking for Vita3K updates...
-   if "%version%" EQU "%git_version%" (
-       echo Your current version of Vita3K %version% is up-to-date, enjoy!
-       pause
-       exit
-    ) else (
-        if exist Vita3K.exe (
-            if "%version%" NEQ "" (
-                echo Your current version of Vita3K %version% is outdated!
-            ) else (
-                echo Your current version of Vita3K is unknown.
-            )
+where 7z >nul 2>nul
+if %errorlevel% equ 0 (
+    :: use 7z
+    if not exist vita3k-latest.7z (
+        echo Checking for Vita3K updates...
+        if "%version%" EQU "%git_version%" (
+            echo Your current version of Vita3K %version% is up-to-date, enjoy!
+            pause
+            exit
         ) else (
-            Setlocal EnableDelayedExpansion
-            echo Vita3K is not installed, do you want to install it?
-            choice /c YN /n /m "Press Y for Yes, N for No."
-            if !errorlevel! EQU 2 (
-                echo Installation canceled.
-                pause
-                exit
+            if exist Vita3K.exe (
+                if "%version%" NEQ "" (
+                    echo Your current version of Vita3K %version% is outdated!
+                ) else (
+                    echo Your current version of Vita3K is unknown.
+                )
+            ) else (
+                Setlocal EnableDelayedExpansion
+                echo Vita3K is not installed, do you want to install it?
+                choice /c YN /n /m "Press Y for Yes, N for No."
+                if !errorlevel! EQU 2 (
+                    echo Installation canceled.
+                    pause
+                    exit
+                )
+            )
+            echo Attempting to download and extract the latest Vita3K version %git_version% in progress...
+            powershell "Invoke-WebRequest https://github.com/Vita3K/Vita3K/releases/download/continuous/windows-latest.7z -OutFile vita3k-latest.7z"
+            if exist Vita3K.exe (
+               taskkill /F /IM Vita3K.exe
             )
         )
-        echo Attempting to download and extract the latest Vita3K version %git_version% in progress...
-        powershell "Invoke-WebRequest https://github.com/Vita3K/Vita3K/releases/download/continuous/windows-latest.zip -OutFile vita3k-latest.zip"
-        if exist Vita3K.exe (
-           taskkill /F /IM Vita3K.exe
+    ) else (
+        set boot=1
+    )
+    
+    if exist vita3k-latest.7z (
+        echo Download completed, extraction in progress...
+        7z x vita3k-latest.7z -o. -aoa
+        del vita3k-latest.7z
+        if "%version%" NEQ "" (
+            echo Successfully updated your Vita3K version from %version% to %git_version%!
+        ) else (
+            echo Vita3K installed with success on version %git_version%!
         )
+        if %boot% EQU 1 (
+            echo Starting Vita3K...
+            Vita3K.exe
+        ) else (
+            echo You can start Vita3K by running Vita3K.exe
+        )
+    ) else if %boot% EQU 0 (
+        echo Download failed, please try again by running the script as administrator.
     )
+    
+    if %boot% EQU 0 (
+        pause
+    )
+
 ) else (
-    set boot=1
-)
-
-if exist vita3k-latest.zip (
-    echo Download completed, extraction in progress...
-    powershell "Expand-Archive -Force -Path vita3k-latest.zip -DestinationPath '.'"
-    del vita3k-latest.zip
-    if "%version%" NEQ "" (
-        echo Successfully updated your Vita3K version from %version% to %git_version%!
+    :: use zip
+    if not exist vita3k-latest.zip (
+        echo Checking for Vita3K updates...
+        if "%version%" EQU "%git_version%" (
+           echo Your current version of Vita3K %version% is up-to-date, enjoy!
+           pause
+           exit
+        ) else (
+            if exist Vita3K.exe (
+                if "%version%" NEQ "" (
+                    echo Your current version of Vita3K %version% is outdated!
+                ) else (
+                    echo Your current version of Vita3K is unknown.
+                )
+            ) else (
+                Setlocal EnableDelayedExpansion
+                echo Vita3K is not installed, do you want to install it?
+                choice /c YN /n /m "Press Y for Yes, N for No."
+                if !errorlevel! EQU 2 (
+                    echo Installation canceled.
+                    pause
+                    exit
+                )
+            )
+            echo Attempting to download and extract the latest Vita3K version %git_version% in progress...
+            powershell "Invoke-WebRequest https://github.com/Vita3K/Vita3K/releases/download/continuous/windows-latest.zip -OutFile vita3k-latest.zip"
+            if exist Vita3K.exe (
+               taskkill /F /IM Vita3K.exe
+            )
+        )
     ) else (
-        echo Vita3K installed with success on version %git_version%!
+        set boot=1
     )
-    if %boot% EQU 1 (
-        echo Starting Vita3K...
-        Vita3K.exe
-    ) else (
-        echo You can start Vita3K by running Vita3K.exe
+    
+    if exist vita3k-latest.zip (
+        echo Download completed, extraction in progress...
+        powershell "Expand-Archive -Force -Path vita3k-latest.zip -DestinationPath '.'"
+        del vita3k-latest.zip
+        if "%version%" NEQ "" (
+            echo Successfully updated your Vita3K version from %version% to %git_version%!
+        ) else (
+            echo Vita3K installed with success on version %git_version%!
+        )
+        if %boot% EQU 1 (
+            echo Starting Vita3K...
+            Vita3K.exe
+        ) else (
+            echo You can start Vita3K by running Vita3K.exe
+        )
+    ) else if %boot% EQU 0 (
+        echo Download failed, please try again by running the script as administrator.
     )
-) else if %boot% EQU 0 (
-    echo Download failed, please try again by running the script as administrator.
-)
-
-if %boot% EQU 0 (
-    pause
+    
+    if %boot% EQU 0 (
+        pause
+    )
 )
