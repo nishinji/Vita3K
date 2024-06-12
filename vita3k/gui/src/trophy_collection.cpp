@@ -123,6 +123,7 @@ static bool load_trophy_progress(IOState &io, const SceUID &progress_input_file,
 }
 
 static std::string np_com_id_sort;
+bool show_hidden_trophy = false;
 
 void init_trophy_collection(GuiState &gui, EmuEnvState &emuenv) {
     const auto TROPHY_PATH{ emuenv.pref_path / "ux0/user" / emuenv.io.user_id / "trophy" };
@@ -684,7 +685,7 @@ void draw_trophy_collection(GuiState &gui, EmuEnvState &emuenv) {
                         ImGui::PopStyleVar();
                     }
                     ImGui::NextColumn();
-                    const auto hidden_trophy = (!trophy_info[trophy.id].earned && (trophy_info[trophy.id].hidden == "yes"));
+                    const auto hidden_trophy = show_hidden_trophy ? false : (!trophy_info[trophy.id].earned && (trophy_info[trophy.id].hidden == "yes"));
                     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (14.f * SCALE.y));
                     ImGui::TextColored(GUI_COLOR_TEXT, "%s", hidden_trophy ? "?" : trophy_info[trophy.id].type["general"].c_str());
                     ImGui::NextColumn();
@@ -782,9 +783,6 @@ void draw_trophy_collection(GuiState &gui, EmuEnvState &emuenv) {
             ImGui::OpenPopup("...");
         if (ImGui::BeginPopup("...", ImGuiWindowFlags_NoMove)) {
             ImGui::TextColored(GUI_COLOR_TEXT_TITLE, "%s", lang["sort"].c_str());
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::Spacing();
             const auto NAME = lang["name"].c_str();
             if (np_com_id_selected.empty()) {
                 if (ImGui::MenuItem(lang["updated"].c_str(), nullptr, np_com_id_sort == "updated")) {
@@ -837,6 +835,15 @@ void draw_trophy_collection(GuiState &gui, EmuEnvState &emuenv) {
                     });
                     trophy_sort = "name";
                 }
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+                ImGui::TextColored(GUI_COLOR_TEXT_TITLE, "Advance");
+                if (ImGui::MenuItem("Show Hidden Trophy", nullptr, &show_hidden_trophy));
+                if (ImGui::MenuItem(reinterpret_cast<const char *>(u8"\u2605 Unlock All"), nullptr)); // u2605 is Åö
+                   // TODO
+                if (ImGui::MenuItem(reinterpret_cast<const char *>(u8"\u2605 Lock All"), nullptr));
+                   // TODO
             }
             ImGui::EndPopup();
         }
