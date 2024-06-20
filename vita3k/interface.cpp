@@ -529,6 +529,9 @@ static void toggle_texture_replacement(EmuEnvState &emuenv) {
 }
 
 static void take_screenshot(EmuEnvState &emuenv) {
+    if (emuenv.cfg.screenshot_format == 0)
+        return;
+
     if (emuenv.io.title_id.empty()) {
         LOG_ERROR("Trying to take a screenshot while not ingame");
     }
