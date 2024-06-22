@@ -152,7 +152,7 @@ static void download_update(const fs::path &base_path) {
     progress_state.download = true;
     progress_state.pause = false;
     std::thread download([base_path]() {
-        std::string download_continuous_link = "https://github.com/Vita3K/Vita3K/releases/download/continuous";
+        std::string download_continuous_link = "https://github.com/nishinji/Vita3K/releases/download/continuous";
 #ifdef WIN32
         download_continuous_link += "/windows-latest.zip";
 #elif defined(__APPLE__)
