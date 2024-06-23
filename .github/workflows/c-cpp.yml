@@ -209,7 +209,12 @@ jobs:
           COMMITTER_NAME=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
           https://api.github.com/repos/nishinji/Vita3K/commits/${{ github.sha }} \
           | jq -r '.commit.author.name')
-          echo "Commiter_Name=$COMMITTER_NAME" >> $GITHUB_ENV
+          echo "Committer_Name=$COMMITTER_NAME" >> $GITHUB_ENV
+
+      - name: Get PR details
+        run: |
+          echo "PR_Number=${{ github.event.pull_request.number }}" >> $GITHUB_ENV"
+          echo "PR_Title=${{ github.event.pull_request.title }}" >> $GITHUB_ENV"
 
       - name: Upload
         shell: bash
@@ -246,6 +251,6 @@ jobs:
 
       - name: Make release on store repository
         run: |
-          ghr_v0.16.2_linux_amd64/ghr -u nishinji -r Vita3K-builds  -n "Builds: ${{ env.Build_Variable }}" -b "$(printf "Corresponding commit: [${{ env.Latest_Commit_Message }}](https://github.com/nishinji/Vita3K/commit/${{ github.sha }}) (${{ env.Commiter_Name }})")" ${{ env.Build_Variable }} artifacts/
+          ghr_v0.16.2_linux_amd64/ghr -u nishinji -r Vita3K-builds  -n "Builds: ${{ env.Build_Variable }}" -b "$(printf "Corresponding PR: [${{ env.PR_Title }}](https://github.com/nishinji/Vita3K/pull/${{ env.PR_Number }}) (${{ env.Committer_Name }})")" ${{ env.Build_Variable }} artifacts/
         env:
           GITHUB_TOKEN: ${{ secrets.BUILD_TOKEN }}
