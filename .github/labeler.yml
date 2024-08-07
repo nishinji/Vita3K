@@ -67,10 +67,6 @@ cpu:
   - changed-files:
     - any-glob-to-any-file:
       - 'vita3k/cpu/**'
-crypto:
-  - changed-files:
-    - any-glob-to-any-file:
-      - 'vita3k/crypto/**'
 ctrl:
   - changed-files:
     - any-glob-to-any-file:
