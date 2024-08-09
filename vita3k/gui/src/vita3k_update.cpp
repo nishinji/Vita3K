@@ -187,7 +187,7 @@ static void download_update(const fs::path &base_path) {
 
 #ifdef WIN32
             const auto vita3K_batch = fmt::format("\"{}/update-vita3k.bat\"", base_path);
-            FreeConsole();
+            // FreeConsole();
 #elif defined(__APPLE__)
             const auto vita3K_batch = fmt::format("sh \"{}/update-vita3k.sh\"", base_path);
 #else
