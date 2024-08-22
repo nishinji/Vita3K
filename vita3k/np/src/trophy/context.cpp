@@ -212,15 +212,15 @@ bool Context::load_trophy_progress_file(const SceUID &progress_input_file) {
         return false;
 
     // Read trophy count by group
-    if (read_stuff(trophy_count_by_group.data(), (std::uint32_t)trophy_count_by_group.size() * 4) != (int)trophy_count_by_group.size() * 4)
+    if (read_stuff(trophy_count_by_group.data(), static_cast<std::uint32_t>(trophy_count_by_group.size()) * 4) != static_cast<int>(trophy_count_by_group.size()) * 4)
         return false;
 
     // Read timestamps
-    if (read_stuff(unlock_timestamps.data(), (std::uint32_t)unlock_timestamps.size() * 8) != (int)unlock_timestamps.size() * 8)
+    if (read_stuff(unlock_timestamps.data(), static_cast<std::uint32_t>(unlock_timestamps.size()) * 8) != static_cast<int>(unlock_timestamps.size()) * 8)
         return false;
 
     // Read trophy type (shinyyyy!! *yes this is lord of the ring reference*)
-    if (read_stuff(trophy_kinds.data(), (std::uint32_t)trophy_kinds.size() * 4) != (int)trophy_kinds.size() * 4)
+    if (read_stuff(trophy_kinds.data(), static_cast<std::uint32_t>(trophy_kinds.size()) * 4) != static_cast<int>(trophy_kinds.size()) * 4)
         return false;
 
     return true;

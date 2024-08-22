@@ -632,7 +632,7 @@ static void traverse_directory(Fat16::Image &img, Fat16::Entry mee, const fs::pa
     fs::create_directories(dir_path);
 
     while (img.get_next_entry(mee)) {
-        if (mee.entry.file_attributes & (int)Fat16::EntryAttribute::DIRECTORY) {
+        if (mee.entry.file_attributes & static_cast<int>(Fat16::EntryAttribute::DIRECTORY)) {
             // Also check if it's not the back folder (. and ..)
             // This can be done by gathering the name
             if (mee.entry.get_entry_type_from_filename() != Fat16::EntryType::DIRECTORY) {
@@ -646,7 +646,7 @@ static void traverse_directory(Fat16::Image &img, Fat16::Entry mee, const fs::pa
             }
         }
 
-        if (mee.entry.file_attributes & (int)Fat16::EntryAttribute::ARCHIVE) {
+        if (mee.entry.file_attributes & static_cast<int>(Fat16::EntryAttribute::ARCHIVE)) {
             extract_file(img, mee, dir_path / "");
         }
     }
@@ -685,7 +685,7 @@ std::string decompress_segments(const std::vector<uint8_t> &decrypted_data, cons
         return "";
     }
 
-    const std::string compressed_data((char *)&decrypted_data[0], size);
+    const std::string compressed_data((char *)(&decrypted_data[0]), size);
     stream.next_in = (const Bytef *)compressed_data.data();
     stream.avail_in = compressed_data.size();
 
@@ -834,7 +834,7 @@ void self2elf(const fs::path &infile, const fs::path &outfile, KeyStore &SCE_KEY
 
         filein.seekg(segment_infos[idx].offset);
         std::vector<unsigned char> dat(segment_infos[idx].size);
-        filein.read((char *)&dat[0], segment_infos[idx].size);
+        filein.read(reinterpret_cast<char *>(&dat[0]), segment_infos[idx].size);
 
         std::vector<unsigned char> decrypted_data(segment_infos[idx].size);
         if (segment_infos[idx].plaintext == SecureBool::NO) {
@@ -850,7 +850,7 @@ void self2elf(const fs::path &infile, const fs::path &outfile, KeyStore &SCE_KEY
             fileout.write(decompressed_data.c_str(), decompressed_data.length());
             at += decompressed_data.length();
         } else {
-            fileout.write((char *)&decrypted_data[0], segment_infos[idx].size);
+            fileout.write(reinterpret_cast<char *>(&decrypted_data[0]), segment_infos[idx].size);
             at += segment_infos[idx].size;
         }
     }
@@ -936,17 +936,17 @@ void make_fself(const fs::path &input_file, const fs::path &output_file, uint64_
     myhdr.e_phnum = ehdr.e_phnum;
 
     fileout.seekp(hdr.appinfo_offset, std::ios_base::beg);
-    fileout.write((char *)&appinfo, sizeof(appinfo));
+    fileout.write(reinterpret_cast<char *>(&appinfo), sizeof(appinfo));
 
     fileout.seekp(hdr.elf_offset, std::ios_base::beg);
-    fileout.write((char *)&myhdr, ElfHeader::Size);
+    fileout.write(reinterpret_cast<char *>(&myhdr), ElfHeader::Size);
 
     fileout.seekp(hdr.phdr_offset, std::ios_base::beg);
     for (int i = 0; i < ehdr.e_phnum; ++i) {
         ElfPhdr phdr = ElfPhdr(&input[0] + ehdr.e_phoff + ehdr.e_phentsize * i);
         if (phdr.p_align > 0x1000)
             phdr.p_align = 0x1000;
-        fileout.write((char *)&phdr, sizeof(phdr));
+        fileout.write(reinterpret_cast<char *>(&phdr), sizeof(phdr));
     }
 
     fileout.seekp(hdr.section_info_offset, std::ios_base::beg);
@@ -957,16 +957,16 @@ void make_fself(const fs::path &input_file, const fs::path &output_file, uint64_
         segment_info.length = phdr.p_filesz;
         segment_info.compression = 1;
         segment_info.encryption = 2;
-        fileout.write((char *)&segment_info, sizeof(segment_info));
+        fileout.write(reinterpret_cast<char *>(&segment_info), sizeof(segment_info));
     }
 
     fileout.seekp(hdr.sceversion_offset, std::ios_base::beg);
-    fileout.write((char *)&ver, sizeof(ver));
+    fileout.write(reinterpret_cast<char *>(&ver), sizeof(ver));
 
     fileout.seekp(hdr.controlinfo_offset, std::ios_base::beg);
-    fileout.write((char *)&control_5, sizeof(control_5));
-    fileout.write((char *)&control_6, sizeof(control_6));
-    fileout.write((char *)&control_7, sizeof(control_7));
+    fileout.write(reinterpret_cast<char *>(&control_5), sizeof(control_5));
+    fileout.write(reinterpret_cast<char *>(&control_6), sizeof(control_6));
+    fileout.write(reinterpret_cast<char *>(&control_7), sizeof(control_7));
 
     fileout.seekp(HEADER_LEN, std::ios_base::beg);
     fileout.write(&input[0], file_size);
@@ -975,7 +975,7 @@ void make_fself(const fs::path &input_file, const fs::path &output_file, uint64_
     hdr.self_filesize = fileout.tellp();
     fileout.seekp(0, std::ios_base::beg);
 
-    fileout.write((char *)&hdr, sizeof(hdr));
+    fileout.write(reinterpret_cast<char *>(&hdr), sizeof(hdr));
 
     fileout.close();
 }
@@ -1029,7 +1029,7 @@ std::vector<SceSegment> get_segments(std::ifstream &file, const SceHeader &sce_h
     EVP_DecryptUpdate(cipher_ctx, dec, &dec_len, dec_in, MetadataInfo::Size);
     EVP_DecryptFinal_ex(cipher_ctx, dec + dec_len, &dec_len);
 
-    MetadataInfo metadata_info = MetadataInfo((char *)dec);
+    MetadataInfo metadata_info = MetadataInfo(reinterpret_cast<char *>(dec));
 
     std::vector<unsigned char> dec1(sce_hdr.header_length - sce_hdr.metadata_offset - 48 - MetadataInfo::Size);
     std::vector<unsigned char> input_data(sce_hdr.header_length - sce_hdr.metadata_offset - 48 - MetadataInfo::Size);
@@ -1041,7 +1041,7 @@ std::vector<SceSegment> get_segments(std::ifstream &file, const SceHeader &sce_h
 
     unsigned char dec2[MetadataHeader::Size];
     std::copy(&dec1[0], &dec1[MetadataHeader::Size], dec2);
-    MetadataHeader metadata_hdr = MetadataHeader((char *)dec2);
+    MetadataHeader metadata_hdr = MetadataHeader(reinterpret_cast<char *>(dec2));
 
     std::vector<SceSegment> segs;
     const auto start = MetadataHeader::Size + metadata_hdr.section_count * MetadataSection::Size;
@@ -1055,7 +1055,7 @@ std::vector<SceSegment> get_segments(std::ifstream &file, const SceHeader &sce_h
     for (uint32_t i = 0; i < metadata_hdr.section_count; i++) {
         std::vector<unsigned char> dec3((MetadataHeader::Size + i * MetadataSection::Size + MetadataSection::Size) - (MetadataHeader::Size + i * MetadataSection::Size));
         memcpy(&dec3[0], &dec1[0] + (MetadataHeader::Size + i * MetadataSection::Size), (MetadataHeader::Size + i * MetadataSection::Size + MetadataSection::Size) - (MetadataHeader::Size + i * MetadataSection::Size));
-        MetadataSection metsec = MetadataSection((char *)&dec3[0]);
+        MetadataSection metsec = MetadataSection(reinterpret_cast<char *>(&dec3[0]));
 
         if (metsec.encryption == EncryptionType::AES128CTR) {
             segs.push_back({ metsec.offset, metsec.seg_idx, metsec.size, metsec.compression == CompressionType::DEFLATE, vault[metsec.key_idx], vault[metsec.iv_idx] });

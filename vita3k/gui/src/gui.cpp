@@ -239,7 +239,7 @@ static void init_font(GuiState &gui, EmuEnvState &emuenv) {
         large_font_config.SizePixels = 116.f;
         gui.large_font = io.Fonts->AddFontFromFileTTF(fs_utils::path_to_utf8(latin_fw_font_path).c_str(), large_font_config.SizePixels, &large_font_config, large_font_chars);
     } else {
-        LOG_WARN("Could not find firmware font file at \"{}\", install firmware fonts package to fix this.", latin_fw_font_path);
+        LOG_WARN("Could not find firmware font file at {}, install firmware fonts package to fix this.", latin_fw_font_path);
         font_config.SizePixels = 22.f;
 
         // Set up default font path
@@ -261,7 +261,7 @@ static void init_font(GuiState &gui, EmuEnvState &emuenv) {
 
             LOG_INFO("Using default Vita3K font.");
         } else
-            LOG_WARN("Could not find default Vita3K font at \"{}\", using default ImGui font.", default_font_path);
+            LOG_WARN("Could not find default Vita3K font at {}, using default ImGui font.", default_font_path);
     }
 
     // Build font atlas loaded and upload to GPU
@@ -423,18 +423,18 @@ static bool get_user_apps(GuiState &gui, EmuEnvState &emuenv) {
         gui.app_selector.user_apps.clear();
         // Read size of apps list
         size_t size;
-        apps_cache.read((char *)&size, sizeof(size));
+        apps_cache.read(reinterpret_cast<char *>(&size), sizeof(size));
 
         // Check version of cache
         uint32_t versionInFile;
-        apps_cache.read((char *)&versionInFile, sizeof(uint32_t));
+        apps_cache.read(reinterpret_cast<char *>(&versionInFile), sizeof(uint32_t));
         if (versionInFile != 1) {
             LOG_WARN("Current version of cache: {}, is outdated, recreate it.", versionInFile);
             return false;
         }
 
         // Read language of cache
-        apps_cache.read((char *)&gui.app_selector.apps_cache_lang, sizeof(uint32_t));
+        apps_cache.read(reinterpret_cast<char *>(&gui.app_selector.apps_cache_lang), sizeof(uint32_t));
         if (gui.app_selector.apps_cache_lang != emuenv.cfg.sys_lang) {
             LOG_WARN("Current lang of cache: {}, is different configuration: {}, recreate it.", get_sys_lang_name(gui.app_selector.apps_cache_lang), get_sys_lang_name(emuenv.cfg.sys_lang));
             return false;
@@ -445,7 +445,7 @@ static bool get_user_apps(GuiState &gui, EmuEnvState &emuenv) {
             auto read = [&apps_cache]() {
                 size_t size;
 
-                apps_cache.read((char *)&size, sizeof(size));
+                apps_cache.read(reinterpret_cast<char *>(&size), sizeof(size));
 
                 std::vector<char> buffer(size); // dont trust std::string to hold buffer enough
                 apps_cache.read(buffer.data(), size);
@@ -488,18 +488,18 @@ void save_apps_cache(GuiState &gui, EmuEnvState &emuenv) {
 
         // Write version of cache
         const uint32_t versionInFile = 1;
-        apps_cache.write((const char *)&versionInFile, sizeof(uint32_t));
+        apps_cache.write(reinterpret_cast<const char *>(&versionInFile), sizeof(uint32_t));
 
         // Write language of cache
         gui.app_selector.apps_cache_lang = emuenv.cfg.sys_lang;
-        apps_cache.write((char *)&gui.app_selector.apps_cache_lang, sizeof(uint32_t));
+        apps_cache.write(reinterpret_cast<char *>(&gui.app_selector.apps_cache_lang), sizeof(uint32_t));
 
         // Write Apps list
         for (const App &app : gui.app_selector.user_apps) {
             auto write = [&apps_cache](const std::string &i) {
                 const auto size = i.length();
 
-                apps_cache.write((const char *)&size, sizeof(size));
+                apps_cache.write(reinterpret_cast<const char *>(&size), sizeof(size));
                 apps_cache.write(i.c_str(), size);
             };
 

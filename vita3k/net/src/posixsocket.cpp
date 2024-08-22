@@ -318,7 +318,7 @@ int PosixSocket::get_socket_options(int level, int optname, void *optval, unsign
             CASE_GETSOCKOPT_VALUE(SCE_NET_SO_USECRYPTO, sockopt_so_usecrypto);
             CASE_GETSOCKOPT_VALUE(SCE_NET_SO_USESIGNATURE, sockopt_so_usesignature);
             CASE_GETSOCKOPT_VALUE(SCE_NET_SO_TPPOLICY, sockopt_so_tppolicy);
-            CASE_GETSOCKOPT_VALUE(SCE_NET_SO_NAME, (char)0); // writes an empty string to the output buffer
+            CASE_GETSOCKOPT_VALUE(SCE_NET_SO_NAME, static_cast<char>(0)); // writes an empty string to the output buffer
         }
     } else if (level == IPPROTO_IP) {
         switch (optname) {
@@ -346,13 +346,13 @@ int PosixSocket::get_socket_options(int level, int optname, void *optval, unsign
 int PosixSocket::recv_packet(void *buf, unsigned int len, int flags, SceNetSockaddr *from, unsigned int *fromlen) {
     if (from != nullptr) {
         sockaddr addr;
-        int res = recvfrom(sock, (char *)buf, len, flags, &addr, (socklen_t *)fromlen);
+        int res = recvfrom(sock, static_cast<char *>(buf), len, flags, &addr, (socklen_t *)fromlen);
         convertPosixSockaddrToSce(&addr, from);
         *fromlen = sizeof(SceNetSockaddrIn);
 
         return translate_return_value(res);
     } else {
-        return translate_return_value(recv(sock, (char *)buf, len, flags));
+        return translate_return_value(recv(sock, static_cast<char *>(buf), len, flags));
     }
 }
 
@@ -360,8 +360,8 @@ int PosixSocket::send_packet(const void *msg, unsigned int len, int flags, const
     if (to != nullptr) {
         sockaddr addr;
         convertSceSockaddrToPosix(to, &addr);
-        return translate_return_value(sendto(sock, (const char *)msg, len, flags, &addr, sizeof(sockaddr_in)));
+        return translate_return_value(sendto(sock, static_cast<const char *>(msg), len, flags, &addr, sizeof(sockaddr_in)));
     } else {
-        return translate_return_value(send(sock, (const char *)msg, len, flags));
+        return translate_return_value(send(sock, static_cast<const char *>(msg), len, flags));
     }
 }

@@ -341,7 +341,7 @@ std::string get_web_response(const std::string &url) {
 
     std::string response_string;
     const auto writeFunc = +[](void *ptr, size_t size, size_t nmemb, std::string *data) {
-        data->append((char *)ptr, size * nmemb);
+        data->append(static_cast<char *>(ptr), size * nmemb);
         return size * nmemb;
     };
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeFunc);

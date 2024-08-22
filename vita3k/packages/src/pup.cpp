@@ -183,7 +183,7 @@ static void decrypt_segments(std::ifstream &infile, const fs::path &outdir, cons
         fs::ofstream outfile(outdir / fs_utils::path_concat(filename, ".seg02"), std::ios::binary);
         infile.seekg(sceseg.offset);
         std::vector<unsigned char> encrypted_data(sceseg.size);
-        infile.read((char *)&encrypted_data[0], sceseg.size);
+        infile.read(reinterpret_cast<char *>(&encrypted_data[0]), sceseg.size);
 
         std::vector<unsigned char> decrypted_data(sceseg.size);
         EVP_DecryptInit_ex(cipher_ctx, cipher, nullptr, reinterpret_cast<const unsigned char *>(sceseg.key.c_str()), reinterpret_cast<const unsigned char *>(sceseg.iv.c_str()));
@@ -195,7 +195,7 @@ static void decrypt_segments(std::ifstream &infile, const fs::path &outdir, cons
             const std::string decompressed_data = decompress_segments(decrypted_data, sceseg.size);
             outfile.write(decompressed_data.c_str(), decompressed_data.size());
         } else {
-            outfile.write((char *)&decrypted_data[0], sceseg.size);
+            outfile.write(reinterpret_cast<char *>(&decrypted_data[0]), sceseg.size);
         }
         outfile.close();
     }

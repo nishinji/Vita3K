@@ -121,7 +121,7 @@ bool install_pkg(const fs::path &pkg_path, EmuEnvState &emuenv, std::string &p_z
     for (uint32_t i = 0; i < byte_swap(pkg_header.info_count); i++) {
         uint32_t block[4];
         infile.seekg(info_offset);
-        infile.read((char *)block, sizeof(block));
+        infile.read(reinterpret_cast<char *>(block), sizeof(block));
 
         auto type = byte_swap(block[0]);
         auto size = byte_swap(block[1]);
@@ -202,7 +202,7 @@ bool install_pkg(const fs::path &pkg_path, EmuEnvState &emuenv, std::string &p_z
     std::vector<uint8_t> sfo_buffer(sfo_size);
     SfoFile sfo_file;
     infile.seekg(sfo_offset);
-    infile.read((char *)&sfo_buffer[0], sfo_size);
+    infile.read(reinterpret_cast<char *>(&sfo_buffer[0]), sfo_size);
     sfo::load(sfo_file, sfo_buffer);
     sfo::get_param_info(emuenv.app_info, sfo_buffer, emuenv.cfg.sys_lang);
 
@@ -259,11 +259,11 @@ bool install_pkg(const fs::path &pkg_path, EmuEnvState &emuenv, std::string &p_z
             evp_cleanup();
             return false;
         }
-        const auto file_count = (float)byte_swap(pkg_header.file_count);
+        const auto file_count = static_cast<float>(byte_swap(pkg_header.file_count));
         progress_callback(i / file_count * 100.f * 0.6f);
         std::vector<unsigned char> name(byte_swap(entry.name_size));
         infile.seekg(byte_swap(pkg_header.data_offset) + byte_swap(entry.name_offset));
-        infile.read((char *)&name[0], byte_swap(entry.name_size));
+        infile.read(reinterpret_cast<char *>(&name[0]), byte_swap(entry.name_size));
 
         decrypt_aes_ctr(byte_swap(entry.name_offset) / 16, name.data(), byte_swap(entry.name_size));
 
