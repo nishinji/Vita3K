@@ -411,7 +411,7 @@ int PosixSocket::get_socket_options(int level, int optname, void *optval, unsign
             CASE_GETSOCKOPT_VALUE(SCE_NET_SO_USECRYPTO, sockopt_so_usecrypto);
             CASE_GETSOCKOPT_VALUE(SCE_NET_SO_USESIGNATURE, sockopt_so_usesignature);
             CASE_GETSOCKOPT_VALUE(SCE_NET_SO_TPPOLICY, sockopt_so_tppolicy);
-            CASE_GETSOCKOPT_VALUE(SCE_NET_SO_NAME, (char)0); // writes an empty string to the output buffer
+            CASE_GETSOCKOPT_VALUE(SCE_NET_SO_NAME, static_cast<char>(0)); // writes an empty string to the output buffer
         }
     } else if (level == IPPROTO_IP) {
         switch (optname) {

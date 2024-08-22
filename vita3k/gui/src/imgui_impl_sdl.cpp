@@ -502,7 +502,7 @@ IMGUI_API void ImGui_ImplSdl_NewFrame(ImGui_State *state) {
     // Setup time step (we don't use SDL_GetTicks() because it is using millisecond resolution)
     static Uint64 frequency = SDL_GetPerformanceFrequency();
     Uint64 current_time = SDL_GetPerformanceCounter();
-    io.DeltaTime = state->time > 0 ? (float)((double)(current_time - state->time) / frequency) : (1.0f / 60.0f);
+    io.DeltaTime = state->time > 0 ? static_cast<float>(static_cast<double>(current_time - state->time) / frequency) : (1.0f / 60.0f);
     state->time = current_time;
 
     if (state->pending_mouse_leave_frame && state->pending_mouse_leave_frame >= ImGui::GetFrameCount() && state->mouse_buttons_down == 0) {
