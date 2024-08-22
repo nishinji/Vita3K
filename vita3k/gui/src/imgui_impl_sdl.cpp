@@ -432,13 +432,13 @@ IMGUI_API void ImGui_ImplSdl_NewFrame(ImGui_State *state) {
     int display_w, display_h;
     SDL_GetWindowSize(state->window, &w, &h);
     ImGui_ImplSdl_GetDrawableSize(state, display_w, display_h);
-    io.DisplaySize = ImVec2((float)w, (float)h);
-    io.DisplayFramebufferScale = ImVec2(w > 0 ? ((float)display_w / w) : 0, h > 0 ? ((float)display_h / h) : 0);
+    io.DisplaySize = ImVec2(static_cast<float>(w), static_cast<float>(h));
+    io.DisplayFramebufferScale = ImVec2(w > 0 ? (static_cast<float>(display_w) / w) : 0, h > 0 ? (static_cast<float>(display_h) / h) : 0);
 
     // Setup time step (we don't use SDL_GetTicks() because it is using millisecond resolution)
     static Uint64 frequency = SDL_GetPerformanceFrequency();
     Uint64 current_time = SDL_GetPerformanceCounter();
-    io.DeltaTime = state->time > 0 ? (float)((double)(current_time - state->time) / frequency) : (1.0f / 60.0f);
+    io.DeltaTime = state->time > 0 ? static_cast<float>(static_cast<double>(current_time - state->time) / frequency) : (1.0f / 60.0f);
     state->time = current_time;
 
     if (state->pending_mouse_leave_frame && state->pending_mouse_leave_frame >= ImGui::GetFrameCount() && state->mouse_buttons_down == 0) {
