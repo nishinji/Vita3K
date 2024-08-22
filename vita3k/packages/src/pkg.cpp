@@ -258,7 +258,7 @@ bool install_pkg(const fs::path &pkg_path, EmuEnvState &emuenv, std::string &p_z
             evp_cleanup();
             return false;
         }
-        const auto file_count = (float)byte_swap(pkg_header.file_count);
+        const auto file_count = static_cast<float>(byte_swap(pkg_header.file_count));
         progress_callback(i / file_count * 100.f * 0.6f);
         std::vector<unsigned char> name(byte_swap(entry.name_size));
         fseek(infile, byte_swap(pkg_header.data_offset) + byte_swap(entry.name_offset), SEEK_SET);

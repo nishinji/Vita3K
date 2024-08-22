@@ -85,10 +85,10 @@ spv::Id finalize(spv::Builder &b, spv::Id first, spv::Id second, const Swizzle4 
     // Try to plant a composite construct
     for (auto i = 0; i < 4; i++) {
         if (dest_mask & (1 << i)) {
-            if ((int)swizz[i] >= (int)SwizzleChannel::C_0) {
+            if (static_cast<int>(swizz[i]) >= static_cast<int>(SwizzleChannel::C_0)) {
                 ops.push_back(get_correspond_constant_with_channel(b, swizz[i]));
             } else if (offset_is_const) {
-                int access_offset = offset_value % 4 + (int)swizz[i] - (int)SwizzleChannel::C_X;
+                int access_offset = offset_value % 4 + static_cast<int>(swizz[i]) - static_cast<int>(SwizzleChannel::C_X);
                 spv::Id access_base = first;
 
                 if (access_offset >= first_comp_count) {
@@ -107,13 +107,13 @@ spv::Id finalize(spv::Builder &b, spv::Id first, spv::Id second, const Swizzle4 
                     return spv::NoResult;
                 }
                 // do exactly as above, but in spirv
-                spv::Id delta = b.makeIntConstant((int)swizz[i] - (int)SwizzleChannel::C_X);
+                spv::Id delta = b.makeIntConstant(static_cast<int>(swizz[i]) - static_cast<int>(SwizzleChannel::C_X));
                 spv::Id access_offset = b.createBinOp(spv::OpIAdd, i32, offset, delta);
                 access_offset = b.createBinOp(spv::OpBitwiseAnd, i32, access_offset, b.makeIntConstant(3));
 
                 spv::Id first_base = b.createOp(spv::OpVectorExtractDynamic, target_type, { first, access_offset });
                 spv::Id second_base = b.createOp(spv::OpVectorExtractDynamic, target_type, { second, access_offset });
-                // select one if (int)swizz[i] - (int)SwizzleChannel::C_X < 4 - offset % 4
+                // select one if static_cast<int>(swizz[i]) - static_cast<int>(SwizzleChannel::C_X) < 4 - offset % 4
                 spv::Id cond = b.createBinOp(spv::OpSLessThan, b.makeBoolType(), delta, first_base_threshold);
                 ops.push_back(b.createOp(spv::OpSelect, target_type, { cond, first_base, second_base }));
             }
@@ -973,7 +973,7 @@ spv::Id load(spv::Builder &b, const SpirvShaderParameters &params, SpirvUtilFunc
     if (op.bank == RegisterBank::IMMEDIATE || !get_reg_bank(params, op.bank)) {
         if (op.bank != RegisterBank::INDEXED1 && op.bank != RegisterBank::INDEXED2) {
             if (dest_comp_count == 1) {
-                if ((int)op.swizzle[0] >= (int)SwizzleChannel::C_0) {
+                if (static_cast<int>(op.swizzle[0]) >= static_cast<int>(SwizzleChannel::C_0)) {
                     return get_correspond_constant_with_channel(b, op.swizzle[0]);
                 }
             }
@@ -1012,7 +1012,7 @@ spv::Id load(spv::Builder &b, const SpirvShaderParameters &params, SpirvUtilFunc
         const Imm2 bank_enc = (op.num >> 5) & 0b11;
         const Imm5 add_off = (op.num & 0b11111) + shift_offset;
 
-        const std::int8_t idx_off = (int)op.bank - (int)RegisterBank::INDEXED1;
+        const std::int8_t idx_off = static_cast<int>(op.bank) - static_cast<int>(RegisterBank::INDEXED1);
 
         switch (bank_enc) {
         case 0: {
@@ -1310,7 +1310,7 @@ void store(spv::Builder &b, const SpirvShaderParameters &params, SpirvUtilFuncti
                     if (b.isScalar(source) || total_comp_source == 1) {
                         ops.push_back(source);
                     } else {
-                        ops.push_back(b.createOp(spv::OpVectorExtractDynamic, vec_comp_type, { source, b.makeIntConstant(std::min(source_value_taken_count++, (int)total_comp_source - 1)) }));
+                        ops.push_back(b.createOp(spv::OpVectorExtractDynamic, vec_comp_type, { source, b.makeIntConstant(std::min(source_value_taken_count++, static_cast<int>(total_comp_source) - 1)) }));
                     }
                 } else {
                     if (elem == spv::NoResult) {
@@ -1327,7 +1327,7 @@ void store(spv::Builder &b, const SpirvShaderParameters &params, SpirvUtilFuncti
                 }
             }
 
-            spv::Id result_type = utils::make_vector_or_scalar_type(b, vec_comp_type, (int)ops.size());
+            spv::Id result_type = utils::make_vector_or_scalar_type(b, vec_comp_type, static_cast<int>(ops.size()));
             spv::Id result = ops.size() == 1 ? ops[0] : b.createCompositeConstruct(result_type, ops);
             result = pack_one(b, utils, features, result, dest.type);
 
@@ -1354,7 +1354,7 @@ void store(spv::Builder &b, const SpirvShaderParameters &params, SpirvUtilFuncti
 
     // Now we do store!
     if (total_comp_source == 1) {
-        insert_offset += (int)(nearest_swizz_on / (4 / size_comp));
+        insert_offset += static_cast<int>(nearest_swizz_on / (4 / size_comp));
         elem = b.createOp(spv::OpAccessChain, comp_type, { bank_base, b.makeIntConstant(insert_offset >> 2) });
         spv::Id inserted = b.createOp(spv::OpVectorInsertDynamic, bank_base_elem_type, { b.createLoad(elem, spv::NoPrecision), source, b.makeIntConstant(insert_offset % 4) });
 

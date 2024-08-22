@@ -1105,7 +1105,7 @@ static SpirvShaderParameters create_parameters(spv::Builder &b, const SceGxmProg
             // specialization constant for shader interlock:
             // layout (constant_id = GAMMA_CORRECTION_SPECIALIZATION_ID) const bool is_srgb = false;
             spv_params.is_srgb_constant = b.makeBoolConstant(false, true);
-            b.addDecoration(spv_params.is_srgb_constant, spv::DecorationSpecId, (int)GAMMA_CORRECTION_SPECIALIZATION_ID);
+            b.addDecoration(spv_params.is_srgb_constant, spv::DecorationSpecId, static_cast<int>(GAMMA_CORRECTION_SPECIALIZATION_ID));
             b.addName(spv_params.is_srgb_constant, "is_srgb");
         }
     }

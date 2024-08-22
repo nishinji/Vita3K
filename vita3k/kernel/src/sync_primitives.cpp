@@ -1842,7 +1842,7 @@ SceSize msgpipe_send(KernelState &kernel, const char *export_name, SceUID thread
             SceSize insertedSize = (SceSize)msgpipe->data_buffer.Insert(pSendBuf, sendSize);
             // msgpipe->senders->erase(wait_data); //Don't erase ourselves - recv will do it
             wakeup_receivers();
-            return (int)insertedSize;
+            return static_cast<int>(insertedSize);
         };
 
         if (!pTimeout) { // No timeout - loop forever until we can fill the buffer

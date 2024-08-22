@@ -103,13 +103,13 @@ static bool load_trophy_progress(IOState &io, const SceUID &progress_input_file,
     }
 
     // Read trophy count by group
-    if (read_trophy_progress_file(np_com_id_info[np_com_id].context.trophy_count_by_group.data(), (uint32_t)np_com_id_info[np_com_id].context.trophy_count_by_group.size() * 4) != (int)np_com_id_info[np_com_id].context.trophy_count_by_group.size() * 4) {
+    if (read_trophy_progress_file(np_com_id_info[np_com_id].context.trophy_count_by_group.data(), (uint32_t)np_com_id_info[np_com_id].context.trophy_count_by_group.size() * 4) != static_cast<int>(np_com_id_info[np_com_id].context.trophy_count_by_group.size()) * 4) {
         LOG_ERROR("Failed to read trophy count by group");
         return false;
     }
 
     // Read trophy timestamps
-    if (read_trophy_progress_file(np_com_id_info[np_com_id].context.unlock_timestamps.data(), (uint32_t)np_com_id_info[np_com_id].context.unlock_timestamps.size() * 8) != (int)np_com_id_info[np_com_id].context.unlock_timestamps.size() * 8) {
+    if (read_trophy_progress_file(np_com_id_info[np_com_id].context.unlock_timestamps.data(), (uint32_t)np_com_id_info[np_com_id].context.unlock_timestamps.size() * 8) != static_cast<int>(np_com_id_info[np_com_id].context.unlock_timestamps.size()) * 8) {
         LOG_ERROR("Failed to read unlock_timestamp");
         return false;
     }
