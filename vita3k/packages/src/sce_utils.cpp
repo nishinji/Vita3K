@@ -632,7 +632,7 @@ static void traverse_directory(Fat16::Image &img, Fat16::Entry mee, const fs::pa
     fs::create_directories(dir_path);
 
     while (img.get_next_entry(mee)) {
-        if (mee.entry.file_attributes & (int)Fat16::EntryAttribute::DIRECTORY) {
+        if (mee.entry.file_attributes & static_cast<int>(Fat16::EntryAttribute::DIRECTORY)) {
             // Also check if it's not the back folder (. and ..)
             // This can be done by gathering the name
             if (mee.entry.get_entry_type_from_filename() != Fat16::EntryType::DIRECTORY) {
@@ -646,7 +646,7 @@ static void traverse_directory(Fat16::Image &img, Fat16::Entry mee, const fs::pa
             }
         }
 
-        if (mee.entry.file_attributes & (int)Fat16::EntryAttribute::ARCHIVE) {
+        if (mee.entry.file_attributes & static_cast<int>(Fat16::EntryAttribute::ARCHIVE)) {
             extract_file(img, mee, dir_path / "");
         }
     }

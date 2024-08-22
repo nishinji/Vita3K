@@ -218,10 +218,10 @@ void SinglePassScreenFilter::init() {
 void SinglePassScreenFilter::render(bool is_pre_renderpass, vk::ImageView src_img, vk::ImageLayout src_layout, const Viewport &viewport) {
     if (is_pre_renderpass) {
         std::array<float, 4> uvs = {
-            viewport.offset_x / (float)viewport.texture_width,
-            viewport.offset_y / (float)viewport.texture_height,
-            (viewport.offset_x + viewport.width) / (float)(viewport.texture_width),
-            (viewport.offset_y + viewport.height) / (float)(viewport.texture_height)
+            viewport.offset_x / static_cast<float>(viewport.texture_width),
+            viewport.offset_y / static_cast<float>(viewport.texture_height),
+            (viewport.offset_x + viewport.width) / static_cast<float>(viewport.texture_width),
+            (viewport.offset_y + viewport.height) / static_cast<float>(viewport.texture_height)
         };
 
         // if necessary update vao (should not happen often)
