@@ -44,6 +44,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include <SDL_mouse.h>
 
 namespace gui {
 
@@ -153,6 +154,11 @@ static void init_style(EmuEnvState &emuenv) {
 static void init_font(GuiState &gui, EmuEnvState &emuenv) {
     ImGuiIO &io = ImGui::GetIO();
 
+    int width, height;
+    SDL_Window *const window = SDL_GetMouseFocus();
+    SDL_GetWindowSize(window, &width, &height);
+    LOG_INFO("Window size: {} x {}\n", width, height);
+
     const auto sys_lang = static_cast<SceSystemParamLang>(emuenv.cfg.sys_lang);
     const bool has_additional_font = emuenv.cfg.asia_font_support
         || sys_lang == SCE_SYSTEM_PARAM_LANG_CHINESE_T
@@ -161,7 +167,7 @@ static void init_font(GuiState &gui, EmuEnvState &emuenv) {
     // make this value as big as we can, while the atlas dimensions stays under 4096x4096
     // well actually when using chinese, the font atlas is already much bigger, but don't
     // increase it even more
-    const float atlas_font_scale = (has_additional_font || emuenv.viewport_size.x <= 1920) ? 1.0f : 2.0f;
+    const float atlas_font_scale = (has_additional_font || width < 1920) ? 1.0f : 2.0f;
 
     ImFontConfig mono_font_config{};
     mono_font_config.SizePixels = 13.f * atlas_font_scale;
