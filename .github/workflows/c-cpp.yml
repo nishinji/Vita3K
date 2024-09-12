@@ -227,8 +227,10 @@ jobs:
                   echo "Compressing $f"
                   (cd $(basename $f) && zip -r ../artifacts/$(basename $f  | cut -d "-" -f 4)-latest.zip *)
                 fi
-              else
+              else # windows
                 echo "Compressing $f"
+                7z a -mx=9 $(basename $f).7z ./$(basename $f)/*
+                cp $(basename $f).7z artifacts/windows-latest.7z
                 (cd $(basename $f) && zip -r ../artifacts/$(basename $f  | cut -d "-" -f 4)-latest.zip *)
               fi
             fi
