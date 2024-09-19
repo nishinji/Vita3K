@@ -7,14 +7,14 @@ echo ============================================================
 echo ====================== Vita3K Updater ======================
 echo ============================================================
 
-for /f "delims=" %%g in ('powershell "((Invoke-RestMethod https://api.github.com/repos/Vita3K/Vita3K/releases/latest -timeout 2).body.Split("\"`n"\") | Select-String -Pattern 'Vita3K Build:') -replace  'Vita3K Build: '"') do @set git_version=%%g
+for /f "delims=" %%g in ('powershell "((Invoke-RestMethod https://api.github.com/repos/nishinji/Vita3K/releases/latest -timeout 2).body.Split("\"`n"\") | Select-String -Pattern 'Vita3K Build:') -replace  'Vita3K Build: '"') do @set git_version=%%g
 if exist Vita3K.exe (
    for /f "delims=" %%v in ('powershell "((Get-Item Vita3K.exe).VersionInfo.FileVersion) -replace '0.2.0.'"') do @set version=%%v
 )
 set boot=0
 
 $osVersion = [System.Environment]::OSVersion.Version
-# Windows 11ÇÃÉoÅ[ÉWÉáÉìî‘çÜ 10.0.22000 à»ç~
+# Windows 11 version number 10.0.22000 later
 $windows11Build = [Version]::new(10, 0, 22000)
 
 if ($osVersion -ge $windows11Build) {
@@ -43,7 +43,7 @@ if ($osVersion -ge $windows11Build) {
                 )
             )
             echo Attempting to download and extract the latest Vita3K version %git_version% in progress...
-            powershell "Invoke-WebRequest https://github.com/Vita3K/Vita3K/releases/download/continuous/windows-latest.zip -OutFile vita3k-latest.7z"
+            powershell "Invoke-WebRequest https://github.com/nishinji/Vita3K/releases/download/continuous/windows-latest.7z -OutFile vita3k-latest.7z"
             if exist Vita3K.exe (
                taskkill /F /IM Vita3K.exe
             )
@@ -100,7 +100,7 @@ if ($osVersion -ge $windows11Build) {
                 )
             )
             echo Attempting to download and extract the latest Vita3K version %git_version% in progress...
-            powershell "Invoke-WebRequest https://github.com/Vita3K/Vita3K/releases/download/continuous/windows-latest.zip -OutFile vita3k-latest.zip"
+            powershell "Invoke-WebRequest https://github.com/nishinji/Vita3K/releases/download/continuous/windows-latest.zip -OutFile vita3k-latest.zip"
             if exist Vita3K.exe (
                taskkill /F /IM Vita3K.exe
             )
