@@ -68,6 +68,7 @@ struct SceRtcTick {
 
 #if defined(_WIN32)
 inline time_t rtc_timegm(struct tm *tm) { return _mkgmtime(tm); }
+
 #elif (defined(__GLIBC__) && !defined(__ANDROID__))
 #define rtc_timegm timegm
 #else
