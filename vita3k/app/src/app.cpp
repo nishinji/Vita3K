@@ -41,6 +41,12 @@ void error_dialog(const std::string &message, SDL_Window *window) {
     }
 }
 
+void info_dialog(const std::string &message, SDL_Window *window) {
+    if (SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Info", message.c_str(), window) < 0) {
+        LOG_ERROR("SDL Info: {}", message);
+    }
+}
+
 static constexpr uint32_t frames_size = 20;
 void calculate_fps(EmuEnvState &emuenv) {
     const uint32_t sdl_ticks_now = SDL_GetTicks();

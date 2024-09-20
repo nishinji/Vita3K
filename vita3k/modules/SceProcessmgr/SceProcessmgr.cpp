@@ -17,6 +17,7 @@
 
 #include "SceProcessmgr.h"
 
+#include <app/functions.h>
 #include <io/functions.h>
 #include <kernel/state.h>
 #include <rtc/rtc.h>
@@ -101,7 +102,10 @@ EXPORT(int, sceKernelCDialogSetLeaseLimit) {
 
 EXPORT(int, sceKernelCallAbortHandler, uint32_t param1, uint32_t param2) {
     TRACY_FUNC(sceKernelCallAbortHandler, param1, param2);
-    return UNIMPLEMENTED();
+    emuenv.kernel.pause_threads();
+    LOG_WARN("sceKernelCallAbortHandler: param1: 0x{:08X}, param2: 0x{:08X}", param1, param2);
+    app::info_dialog("Application requests to quit.");
+    exit(0);
 }
 
 EXPORT(int, sceKernelGetCurrentProcess) {
