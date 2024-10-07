@@ -223,7 +223,7 @@ void draw_manual(GuiState &gui, EmuEnvState &emuenv) {
     }
 
     // Draw right button
-    if (current_page < (int)gui.manuals.size() - 1) {
+    if (current_page < static_cast<int>(gui.manuals.size()) - 1) {
         ImGui::SetCursorPos(ImVec2(display_size.x - (70.f * SCALE.x), display_size.y - (40.0f * SCALE.y)));
         if ((!hidden_button && ImGui::Button(">", BUTTON_SIZE)) || ImGui::IsKeyPressed(static_cast<ImGuiKey>(emuenv.cfg.keyboard_leftstick_right))) {
             scroll = 0.f;

@@ -98,15 +98,15 @@ IMGUI_API ImGui_State *ImGui_ImplSdl_Init(renderer::State *renderer, SDL_Window 
     // Set platform dependent data in viewport
     // Our mouse update function expect PlatformHandle to be filled for the main viewport
     ImGuiViewport *main_viewport = ImGui::GetMainViewport();
-    main_viewport->PlatformHandle = (void *)window;
+    main_viewport->PlatformHandle = static_cast<void *>(window);
     main_viewport->PlatformHandleRaw = nullptr;
     SDL_SysWMinfo info;
     SDL_VERSION(&info.version);
     if (SDL_GetWindowWMInfo(window, &info)) {
 #if defined(SDL_VIDEO_DRIVER_WINDOWS)
-        main_viewport->PlatformHandleRaw = (void *)info.info.win.window;
+        main_viewport->PlatformHandleRaw = static_cast<void *>(info.info.win.window);
 #elif defined(__APPLE__) && defined(SDL_VIDEO_DRIVER_COCOA)
-        main_viewport->PlatformHandleRaw = (void *)info.info.cocoa.window;
+        main_viewport->PlatformHandleRaw = static_cast<void *>(info.info.cocoa.window);
 #endif
     }
 
@@ -137,13 +137,13 @@ IMGUI_API void ImGui_ImplSdl_NewFrame(ImGui_State *state) {
     int display_w, display_h;
     SDL_GetWindowSize(state->window, &w, &h);
     ImGui_ImplSdl_GetDrawableSize(state, display_w, display_h);
-    io.DisplaySize = ImVec2((float)w, (float)h);
-    io.DisplayFramebufferScale = ImVec2(w > 0 ? ((float)display_w / w) : 0, h > 0 ? ((float)display_h / h) : 0);
+    io.DisplaySize = ImVec2(static_cast<float>(w), static_cast<float>(h));
+    io.DisplayFramebufferScale = ImVec2(w > 0 ? (static_cast<float>(display_w) / w) : 0, h > 0 ? (static_cast<float>(display_h) / h) : 0);
 
     // Setup time step (we don't use SDL_GetTicks() because it is using millisecond resolution)
     static Uint64 frequency = SDL_GetPerformanceFrequency();
     Uint64 current_time = SDL_GetPerformanceCounter();
-    io.DeltaTime = state->time > 0 ? (float)((double)(current_time - state->time) / frequency) : (1.0f / 60.0f);
+    io.DeltaTime = state->time > 0 ? static_cast<float>(static_cast<double>(current_time - state->time) / frequency) : (1.0f / 60.0f);
     state->time = current_time;
 
     // Setup mouse inputs (we already got mouse wheel, keyboard keys & characters from our event handler)
@@ -156,7 +156,7 @@ IMGUI_API void ImGui_ImplSdl_NewFrame(ImGui_State *state) {
     state->mouse_pressed[0] = state->mouse_pressed[1] = state->mouse_pressed[2] = false;
 
     if ((SDL_GetWindowFlags(state->window) & SDL_WINDOW_INPUT_FOCUS) != 0)
-        io.MousePos = ImVec2((float)mx, (float)my);
+        io.MousePos = ImVec2(static_cast<float>(mx), static_cast<float>(my));
 
     // Update OS/hardware mouse cursor if imgui isn't drawing a software cursor
     if ((io.ConfigFlags & ImGuiConfigFlags_NoMouseCursorChange) == 0) {
