@@ -2,6 +2,10 @@ name: C/C++ CI
 
 on: [push, pull_request]
 
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
 jobs:
   format-check:
     runs-on: ubuntu-latest
@@ -25,24 +29,24 @@ jobs:
         include:
           - os: ubuntu-latest
             version: appimage
-            cache_path: ~/.ccache
+            #cache_path: ~/.ccache
             extra_cmake_args: -DLINUXDEPLOY_COMMAND=/usr/local/bin/linuxdeploy-x86_64.AppImage
             cmake_preset: linux-ninja-clang15-appimage
           - os: ubuntu-latest
             version: zip
-            cache_path: ~/.ccache
+            #cache_path: ~/.ccache
             cmake_preset: linux-ninja-clang15
           - os: windows-latest
             version: zip
-            cache_path: |
-                C:\vcpkg\installed
-                C:\vcpkg\packages
-                C:\Users\runneradmin\AppData\Local\ccache
+            #cache_path: |
+            #    C:\vcpkg\installed
+            #    C:\vcpkg\packages
+            #    C:\Users\runneradmin\AppData\Local\ccache
             extra_cmake_args: -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
             cmake_preset: windows-ninja
           - os: macos-latest
             version: zip
-            cache_path: ~/Library/Caches/ccache
+            #cache_path: ~/Library/Caches/ccache
             extra_cmake_args: -DCMAKE_OSX_ARCHITECTURES="x86_64" -DFORCE_BUILD_OPENSSL_MAC=ON -DVITA3K_FORCE_CUSTOM_BOOST=ON
             cmake_preset: macos-ninja
         exclude:
@@ -71,21 +75,31 @@ jobs:
           sudo apt update
           sudo apt -y install ccache libboost-filesystem1.83-dev libboost-program-options1.83-dev libboost-system1.83-dev libgtk-3-dev libsdl2-dev ninja-build libfuse2
         if: matrix.os == 'ubuntu-latest'
-
-      - uses: ilammy/msvc-dev-cmd@v1
-        if: matrix.os == 'windows-latest'
  
-      - uses: actions/cache@v4
+      - name: Cache CMake Configuration
+        uses: actions/cache@v4
+        env:
+          cache-name: ${{ matrix.os }}-${{ matrix.config }}-cache-cmake-configuration
         with:
-          path: ${{ matrix.cache_path }}
-          key: cache-${{ matrix.os }}-${{ matrix.config }}-${{ github.sha }}
+          path: ${{github.workspace}}/build
+          key: ${{ env.cache-name }}-${{ hashFiles('**/CMakeLists.txt', 'cmake/**') }}
           restore-keys: |
-            cache-${{ matrix.os }}-${{ matrix.config }}-
+            ${{ env.cache-name }}-
+
+      - name: Cache CMake Build
+        uses: hendrikmuhs/ccache-action@v1.2.14
+        env:
+            cache-name: ${{ matrix.os }}-${{ matrix.config }}-cache-cmake-build
+        with:
+          append-timestamp: false
+          key: ${{ env.cache-name }}-${{ hashFiles('**/CMakeLists.txt', 'cmake/**') }}
+
+      - uses: ilammy/msvc-dev-cmd@v1.13.0
+        if: matrix.os == 'windows-latest'
 
       - name: Set up build environment (windows-latest)
         run: |
           vcpkg install zlib:x64-windows-static-md boost-system:x64-windows-static-md boost-filesystem:x64-windows-static-md boost-program-options:x64-windows-static-md boost-icl:x64-windows-static-md boost-variant:x64-windows-static-md curl:x64-windows-static-md openssl:x64-windows-static-md
-          choco install ccache
         if: matrix.os == 'windows-latest'
 
       - name: Set up SDL 2.30.9 (ubuntu-latest)
@@ -115,16 +129,13 @@ jobs:
           sudo chmod +x /usr/local/bin/linuxdeploy-x86_64.AppImage
         if: matrix.os == 'ubuntu-latest' && matrix.version == 'appimage'
 
-      - name: Ccache setup
-        run: ccache -z
-
       - name: CMake
         run: |
-          cmake ${{ matrix.extra_cmake_args }} --preset ${{ matrix.cmake_preset }}
-          cmake --build build/${{ matrix.cmake_preset }} --config ${{ matrix.config }}
+          cmake --fresh -G Ninja -B ${{github.workspace}}/build ${{ matrix.extra_cmake_args }} -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build ${{github.workspace}}/build --config ${{ matrix.config }}
 
       - name: CTest
-        working-directory: build/${{ matrix.cmake_preset }}
+        working-directory: ${{github.workspace}}/build
         run: ctest --build-config ${{ matrix.config }} --output-on-failure
 
       - name: Compute git short sha
@@ -139,7 +150,7 @@ jobs:
       - name: Bundle Shared Objects
         id: bundle_shared_objects
         run: |
-            cd build/${{ matrix.cmake_preset }}/bin/${{ matrix.config }}
+            cd ${{github.workspace}}/build/bin/${{ matrix.config }}
             cp /usr/lib/x86_64-linux-gnu/libssl.so.3 ./libssl.so.3
             cp /usr/lib/x86_64-linux-gnu/libcrypto.so.3 ./libcrypto.so.3
         if: matrix.os == 'ubuntu-latest'
@@ -149,7 +160,7 @@ jobs:
         
       - name: Create DMG (macos-latest)
         run: |
-          cd build/${{ matrix.cmake_preset }}/bin/${{ matrix.config }}
+          cd ${{github.workspace}}/build/bin/${{ matrix.config }}
           create-dmg \
             --volname "Vita3K Installer" \
             --volicon Vita3K.app/Contents/Resources/Vita3K.icns \
@@ -164,7 +175,7 @@ jobs:
 
       - name: Clean appimage build (ubuntu-latest, appimage)
         run: |
-          cd build/${{ matrix.cmake_preset }}/bin/${{ matrix.config }}
+          cd ${{github.workspace}}/build/bin/${{ matrix.config }}
           cp -f *AppImage* ../
           rm -rf ./*
           cp -f ../*AppImage* ./
@@ -176,7 +187,7 @@ jobs:
           name: vita3k-${{ env.git_short_sha }}-${{ matrix.version }}-${{ matrix.os }}
           # path is set up to be <binary_dir>/bin/<config_type> since that's how multi-config
           # generators work on CMake
-          path: build/${{ matrix.cmake_preset }}/bin/${{ matrix.config }}
+          path: ${{github.workspace}}/build/bin/${{ matrix.config }}
 
     outputs:
       BuildTag: ${{ env.build_variable }}
