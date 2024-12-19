@@ -93,23 +93,23 @@
       }
     },
     {
-      "name": "linux-ninja-clang15",
+      "name": "linux-ninja-clang18",
       "inherits": "linux-ninja",
-      "displayName": "Linux with Ninja and Clang 15",
-      "description": "Linux native build using Ninja Multi-Config generator and Clang 15 compiler",
+      "displayName": "Linux with Ninja and Clang 18",
+      "description": "Linux native build using Ninja Multi-Config generator and Clang 18 compiler",
       "cacheVariables": {
-        "CMAKE_C_COMPILER": "clang-15",
-        "CMAKE_CXX_COMPILER": "clang++-15"
+        "CMAKE_C_COMPILER": "clang-18",
+        "CMAKE_CXX_COMPILER": "clang++-18"
       },
       "environment": {
-        "LDFLAGS": "-fuse-ld=lld-15"
+        "LDFLAGS": "-fuse-ld=lld-18"
       }
     },
     {
-      "name": "linux-ninja-clang15-appimage",
-      "inherits": "linux-ninja-clang15",
-      "displayName": "Linux AppImage with Ninja and Clang 15",
-      "description": "Linux AppImage build using Ninja Multi-Config generator and Clang 15 compiler",
+      "name": "linux-ninja-clang18-appimage",
+      "inherits": "linux-ninja-clang18",
+      "displayName": "Linux AppImage with Ninja and Clang 18",
+      "description": "Linux AppImage build using Ninja Multi-Config generator and Clang 18 compiler",
       "cacheVariables": {
         "CMAKE_INSTALL_PREFIX": "/usr",
         "BUILD_APPIMAGE": true
@@ -268,32 +268,32 @@
       "configurePreset": "linux-ninja-clang"
     },
     {
-      "name": "linux-ninja-clang15-appimage-release",
+      "name": "linux-ninja-clang18-appimage-release",
       "displayName": "Release",
       "description": "Build with compiler optimizations enabled and no debugging information as an AppImage",
       "configuration": "Release",
-      "configurePreset": "linux-ninja-clang15-appimage"
+      "configurePreset": "linux-ninja-clang18-appimage"
     },
     {
-      "name": "linux-ninja-clang15-debug",
+      "name": "linux-ninja-clang18-debug",
       "displayName": "Debug",
       "description": "Build with debugging information and no compiler optimizations",
       "configuration": "Debug",
-      "configurePreset": "linux-ninja-clang15"
+      "configurePreset": "linux-ninja-clang18"
     },
     {
-      "name": "linux-ninja-clang15-relwithdebinfo",
+      "name": "linux-ninja-clang18-relwithdebinfo",
       "displayName": "Release with debugging information",
       "description": "Build with compiler optimizations enabled and limited debugging information",
       "configuration": "RelWithDebInfo",
-      "configurePreset": "linux-ninja-clang15"
+      "configurePreset": "linux-ninja-clang18"
     },
     {
-      "name": "linux-ninja-clang15-release",
+      "name": "linux-ninja-clang18-release",
       "displayName": "Release",
       "description": "Build with compiler optimizations enabled and no debugging information",
       "configuration": "Release",
-      "configurePreset": "linux-ninja-clang15"
+      "configurePreset": "linux-ninja-clang18"
     },
     {
       "name": "linux-ninja-gnu-debug",
