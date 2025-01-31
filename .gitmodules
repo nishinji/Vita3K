@@ -87,3 +87,6 @@
 [submodule "external/concurrentqueue"]
 	path = external/concurrentqueue
 	url = https://github.com/cameron314/concurrentqueue.git
+[submodule "external/magic-enum"]
+	path = external/magic-enum
+	url = https://github.com/Neargye/magic_enum.git

@@ -72,6 +72,9 @@ add_library(better-enums INTERFACE)
 target_include_directories(better-enums INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/better-enums")
 target_compile_definitions(better-enums INTERFACE BETTER_ENUMS_STRICT_CONVERSION=1)
 
+add_library(magic-enum INTERFACE)
+target_include_directories(magic-enum INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/magic-enum")
+
 add_library(googletest STATIC googletest/googletest/src/gtest_main.cc googletest/googletest/src/gtest-all.cc)
 target_include_directories(googletest PUBLIC googletest/googletest/include)
 target_include_directories(googletest PRIVATE googletest/googletest)
