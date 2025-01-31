@@ -20,6 +20,7 @@
 #define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_TRACE
 
 #include <spdlog/spdlog.h>
+#include <include/magic_enum/magic_enum.hpp>
 #include <util/exit_code.h>
 #include <util/fs.h>
 
