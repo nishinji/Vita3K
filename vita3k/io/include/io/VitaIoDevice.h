@@ -17,9 +17,9 @@
 
 #pragma once
 
-#include <enum.h>
+#include <magic_enum.hpp>
 
-BETTER_ENUM(VitaIoDevice, int,
+enum class VitaIoDevice : int {
     addcont0 = 0,
     app0,
     host0,
@@ -47,4 +47,5 @@ BETTER_ENUM(VitaIoDevice, int,
     video0,
     vs0,
     xmc0,
-    _INVALID = -1)
+    _INVALID = -1
+};
