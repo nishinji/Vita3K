@@ -90,3 +90,6 @@
 [submodule "external/libadrenotools"]
 	path = external/libadrenotools
 	url = https://github.com/bylaws/libadrenotools
+[submodule "external/magic-enum"]
+	path = external/magic-enum
+	url = https://github.com/Neargye/magic_enum.git
