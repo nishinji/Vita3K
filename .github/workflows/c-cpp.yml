@@ -35,9 +35,7 @@ jobs:
           - os: windows-latest
             version: zip
             cache_path: |
-                C:\vcpkg\installed
-                C:\vcpkg\packages
-                C:\Users\runneradmin\AppData\Local\ccache
+                ~\AppData\Roaming\ccache
             extra_cmake_args: -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
             cmake_preset: windows-ninja
           - os: macos-latest
@@ -81,7 +79,15 @@ jobs:
           key: cache-${{ matrix.os }}-${{ matrix.config }}-${{ github.sha }}
           restore-keys: |
             cache-${{ matrix.os }}-${{ matrix.config }}-
+        if: matrix.os == 'ubuntu-22.04' && 'macos-latest'
 
+      - uses: actions/cache@v4
+        with:
+          path: ${{ matrix.cache_path }}
+          key: ccache-${{ hashFiles('**/*.cpp', '**/*.hpp') }}
+          restore-keys: ccache-
+        if: matrix.os == 'windows-latest'
+        
       - name: Set up build environment (windows-latest)
         run: |
           vcpkg install zlib:x64-windows-static-md boost-system:x64-windows-static-md boost-filesystem:x64-windows-static-md boost-program-options:x64-windows-static-md boost-icl:x64-windows-static-md boost-variant:x64-windows-static-md curl:x64-windows-static-md openssl:x64-windows-static-md
