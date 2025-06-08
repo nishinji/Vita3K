@@ -145,7 +145,23 @@ jobs:
         if: matrix.os == 'ubuntu-22.04'
 
       - name: Ccache statistics
-        run: ccache -s  
+        run: ccache -s
+
+      - name: Write ccache summary
+        shell: bash
+        run: |
+          echo "## Ccache Summary - ${{ matrix.os }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          STATS=$(ccache -s)
+
+          CACHE_SIZE=$(echo "$STATS" | grep -i 'cache size' | awk -F ':' '{print $2}' | xargs)
+          HIT_RATE=$(echo "$STATS" | grep -i 'Hits:' | head -n 1 | awk -F ':' '{print $2}' | xargs)
+
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Cache Size | $CACHE_SIZE |" >> $GITHUB_STEP_SUMMARY
+          echo "| Hit Rate (%) | $HIT_RATE |" >> $GITHUB_STEP_SUMMARY
         
       - name: Create DMG (macos-latest)
         run: |
