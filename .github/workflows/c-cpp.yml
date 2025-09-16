@@ -4,10 +4,10 @@ on: [push, pull_request]
 
 jobs:
   format-check:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Format check
         run: .github/format-check.sh
@@ -52,7 +52,7 @@ jobs:
             version: appimage
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           submodules: recursive
@@ -179,7 +179,7 @@ jobs:
       github.ref == 'refs/heads/master' &&
       github.repository == 'Vita3K/Vita3K'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Download Artifacts
         uses: actions/download-artifact@v4
@@ -218,11 +218,11 @@ jobs:
                 else
                   rm -f $(basename $f)/*.AppImage*
                   echo "Compressing $f"
-                  (cd $(basename $f) && zip -r ../artifacts/$(basename $f  | cut -d "-" -f 4)-latest.zip *)
+                  7z a -mx=9 artifacts/vita3k-$(basename $f)-latest.zip
                 fi
               else
                 echo "Compressing $f"
-                (cd $(basename $f) && zip -r ../artifacts/$(basename $f  | cut -d "-" -f 4)-latest.zip *)
+                7z a -mx=9 artifacts/vita3k-$(basename $f)-latest.zip
               fi
             fi
           done
