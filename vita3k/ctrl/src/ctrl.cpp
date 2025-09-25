@@ -179,29 +179,6 @@ static void apply_keyboard(uint32_t *buttons, float axes[4], bool ext, EmuEnvSta
     axes[3] += keys_to_axis(keys, static_cast<SDL_Scancode>(emuenv.cfg.keyboard_rightstick_up), static_cast<SDL_Scancode>(emuenv.cfg.keyboard_rightstick_down));
 }
 
-static float axis_to_axis(int16_t axis) {
-    const auto unsigned_axis = static_cast<float>(axis - INT16_MIN);
-    assert(unsigned_axis >= 0);
-    assert(unsigned_axis <= UINT16_MAX);
-
-    const float f = unsigned_axis / UINT16_MAX;
-
-    const float output = (f * 2) - 1;
-    assert(output >= -1);
-    assert(output <= 1);
-
-    return output;
-}
-
-static uint8_t float_to_byte(float f) {
-    const float mapped = (f * 0.5f) + 0.5f;
-    const float clamped = std::max<float>(0.0f, std::min<float>(mapped, 1.0f));
-    assert(clamped >= 0);
-    assert(clamped <= 1);
-
-    return static_cast<uint8_t>(clamped * 255);
-}
-
 static std::array<ControllerBinding, 13> get_controller_bindings(EmuEnvState &emuenv) {
     return { {
         { static_cast<SDL_GamepadButton>(emuenv.cfg.controller_binds[SDL_GAMEPAD_BUTTON_BACK]), SCE_CTRL_SELECT },
@@ -240,6 +217,26 @@ std::array<ControllerBinding, 15> get_controller_bindings_ext(EmuEnvState &emuen
     } };
 }
 
+static float axis_to_axis(int16_t axis, EmuEnvState &emuenv) {
+    auto &mult = emuenv.cfg.controller_analog_multiplier;
+    const auto unsigned_axis = static_cast<float>(axis - INT16_MIN);
+    assert(unsigned_axis >= 0);
+    assert(unsigned_axis <= UINT16_MAX);
+
+    const float f = unsigned_axis / UINT16_MAX;
+
+    const float output = std::clamp(((f * 2) - 1) * mult, -1.0f, 1.0f);
+
+    return output;
+}
+
+static uint8_t float_to_byte(float f) {
+    const float mapped = (f * 0.5f) + 0.5f;
+    const float clamped = std::clamp(mapped, -1.0f, 1.0f);
+
+    return static_cast<uint8_t>(clamped * 255);
+}
+
 static void apply_controller(EmuEnvState &emuenv, uint32_t *buttons, float axes[4], SDL_Gamepad *controller, bool ext) {
     if (ext) {
         for (const auto &binding : get_controller_bindings_ext(emuenv)) {
@@ -262,10 +259,10 @@ static void apply_controller(EmuEnvState &emuenv, uint32_t *buttons, float axes[
         }
     }
 
-    axes[0] += axis_to_axis(SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_LEFTX));
-    axes[1] += axis_to_axis(SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_LEFTY));
-    axes[2] += axis_to_axis(SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_RIGHTX));
-    axes[3] += axis_to_axis(SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_RIGHTY));
+    axes[0] += axis_to_axis(SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_LEFTX), emuenv);
+    axes[1] += axis_to_axis(SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_LEFTY), emuenv);
+    axes[2] += axis_to_axis(SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_RIGHTX), emuenv);
+    axes[3] += axis_to_axis(SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_RIGHTY), emuenv);
 }
 
 static void retrieve_ctrl_data(EmuEnvState &emuenv, int port, bool is_v2, bool negative, bool from_ext_function, SceUInt32 &buttons, SceUInt8 &lx, SceUInt8 &ly, SceUInt8 &rx, SceUInt8 &ry) {
@@ -276,7 +273,7 @@ static void retrieve_ctrl_data(EmuEnvState &emuenv, int port, bool is_v2, bool n
     }
     CtrlState &state = emuenv.ctrl;
 
-    std::array<float, 4> axes;
+    std::array<float, 4> axes{};
     axes.fill(0);
 
     const auto reset_axes = [&]() {
