@@ -34,10 +34,7 @@ jobs:
             cmake_preset: linux-ninja-clang
           - os: windows-latest
             version: zip
-            cache_path: |
-                C:\vcpkg\installed
-                C:\vcpkg\packages
-                C:\Users\runneradmin\AppData\Local\ccache
+            cache_path: C:\Users\runneradmin\AppData\Local\sccache
             extra_cmake_args: -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
             cmake_preset: windows-ninja
           - os: macos-latest
@@ -75,18 +72,27 @@ jobs:
 
       - uses: ilammy/msvc-dev-cmd@v1
         if: matrix.os == 'windows-latest'
- 
+
+      # Windows 用 sccache キャッシュ
       - uses: actions/cache@v4
         with:
           path: ${{ matrix.cache_path }}
-          key: cache-${{ matrix.os }}-${{ matrix.config }}-${{ github.sha }}
+          key: sccache-${{ matrix.os }}-${{ matrix.config }}-v1
           restore-keys: |
-            cache-${{ matrix.os }}-${{ matrix.config }}-
+            sccache-${{ matrix.os }}-${{ matrix.config }}-
+        if: matrix.os == 'windows-latest'
+
+      - name: Set up sccache (windows-latest)
+        run: |
+          choco install sccache
+          echo "SCCACHE_DIR=${{ matrix.cache_path }}" >> $GITHUB_ENV
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+        if: matrix.os == 'windows-latest'
 
       - name: Set up build environment (windows-latest)
         run: |
           vcpkg install zlib:x64-windows-static-md boost-system:x64-windows-static-md boost-filesystem:x64-windows-static-md boost-program-options:x64-windows-static-md boost-icl:x64-windows-static-md boost-variant:x64-windows-static-md curl:x64-windows-static-md openssl:x64-windows-static-md
-          choco install ccache
         if: matrix.os == 'windows-latest'
 
       - name: Set up linuxdeploy (ubuntu-22.04, appimage)
@@ -98,12 +104,17 @@ jobs:
           sudo chmod +x /usr/local/bin/linuxdeploy-x86_64.AppImage
         if: matrix.os == 'ubuntu-22.04' && matrix.version == 'appimage'
 
-      - name: Ccache setup
+      - name: Reset compiler cache stats (Linux / macOS)
         run: ccache -z
+        if: matrix.os != 'windows-latest'
 
       - name: CMake
+        shell: bash
         run: |
-          cmake ${{ matrix.extra_cmake_args }} --preset ${{ matrix.cmake_preset }}
+          cmake ${{ matrix.extra_cmake_args }} \
+            -DCMAKE_C_COMPILER_LAUNCHER=${{ env.CMAKE_C_COMPILER_LAUNCHER }} \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=${{ env.CMAKE_CXX_COMPILER_LAUNCHER }} \
+            --preset ${{ matrix.cmake_preset }}
           cmake --build build/${{ matrix.cmake_preset }} --config ${{ matrix.config }}
 
       - name: CTest
@@ -120,16 +131,24 @@ jobs:
         if: matrix.os == 'ubuntu-22.04'
 
       - name: Bundle Shared Objects
-        id: bundle_shared_objects
         run: |
-            cd build/${{ matrix.cmake_preset }}/bin/${{ matrix.config }}
-            cp /usr/lib/x86_64-linux-gnu/libssl.so.3 ./libssl.so.3
-            cp /usr/lib/x86_64-linux-gnu/libcrypto.so.3 ./libcrypto.so.3
+          cd build/${{ matrix.cmake_preset }}/bin/${{ matrix.config }}
+          cp /usr/lib/x86_64-linux-gnu/libssl.so.3 ./libssl.so.3
+          cp /usr/lib/x86_64-linux-gnu/libcrypto.so.3 ./libcrypto.so.3
         if: matrix.os == 'ubuntu-22.04'
 
-      - name: Ccache statistics
-        run: ccache -s  
-        
+      - name: Compiler cache / sccache statistics & diagnostics
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            echo "=== sccache stats ==="
+            sccache --show-stats
+            echo "=== sccache cores ==="
+            sccache --show-cores
+          else
+            echo "=== ccache stats ==="
+            ccache -s
+          fi
+
       - name: Create DMG (macos-latest)
         run: |
           cd build/${{ matrix.cmake_preset }}/bin/${{ matrix.config }}
@@ -157,113 +176,8 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: vita3k-${{ env.git_short_sha }}-${{ matrix.version }}-${{ matrix.os }}
-          # path is set up to be <binary_dir>/bin/<config_type> since that's how multi-config
-          # generators work on CMake
           path: build/${{ matrix.cmake_preset }}/bin/${{ matrix.config }}
 
     outputs:
       BuildTag: ${{ env.build_variable }}
       ShortSHA: ${{ env.git_short_sha }}
-
-  create-release:
-    needs: [build]
-    strategy:
-      fail-fast: false
-      matrix:
-        repo: [master, store]
-    runs-on: ubuntu-22.04
-    concurrency:
-      group: create-release-${{ matrix.repo }}
-      cancel-in-progress: false
-    if: |
-      github.ref == 'refs/heads/master' &&
-      github.repository == 'Vita3K/Vita3K'
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download Artifacts
-        uses: actions/download-artifact@v4
-
-      - name: Get Build Variable
-        run: echo "Build_Variable=${{ needs.build.outputs.BuildTag }}" >> $GITHUB_ENV
-
-      - name: Get Git Short SHA
-        run: echo "Short_SHA=${{ needs.build.outputs.ShortSHA }}" >> $GITHUB_ENV
-
-      - name: Get latest commit message
-        run: echo "Latest_Commit_Message=$(git log -1 --pretty=format:'%s')" >> $GITHUB_ENV
-
-      - name: Get last committer
-        run: |
-          COMMITTER_NAME=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-          https://api.github.com/repos/Vita3K/Vita3K/commits/${{ github.sha }} \
-          | jq -r '.commit.author.name')
-          echo "Commiter_Name=$COMMITTER_NAME" >> $GITHUB_ENV
-
-      - name: Upload
-        shell: bash
-        run: |
-          mkdir artifacts/
-          files=$(find . \( -name "*latest" -o -name "*22.04" \))
-          for f in $files; do
-            if [[ $f == *macos-latest ]]
-            then
-              cp $(basename $f)/$(basename $f).dmg artifacts/macos-latest.dmg
-            else
-              if [[ $f == *ubuntu-22.04 ]]
-              then
-                if [[ $f == *appimage* ]]
-                then
-                  cp $(basename $f)/*.AppImage* artifacts/
-                else
-                  rm -f $(basename $f)/*.AppImage*
-                  echo "Compressing $f"
-                  (cd $(basename $f) && zip -r ../artifacts/$(basename $f  | cut -d "-" -f 4)-latest.zip *)
-                fi
-              else
-                echo "Compressing $f"
-                (cd $(basename $f) && zip -r ../artifacts/$(basename $f  | cut -d "-" -f 4)-latest.zip *)
-              fi
-            fi
-          done
-          ls -al artifacts/
-          wget -c https://github.com/tcnksm/ghr/releases/download/v0.17.0/ghr_v0.17.0_linux_amd64.tar.gz
-          tar xfv ghr_v0.17.0_linux_amd64.tar.gz
-          ghr_v0.17.0_linux_amd64/ghr -u Vita3K -r Vita3K -recreate -n 'Automatic CI builds' -b "$(printf "Corresponding commit: ${{ github.sha }}\nVita3K Build: ${{ env.Build_Variable }}")" continuous artifacts/
-        if: matrix.repo == 'master'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Make release on store repository
-        shell: bash
-        run: |
-          mkdir artifacts/
-          files=$(find . \( -name "*latest" -o -name "*22.04" \))
-          for f in $files; do
-            if [[ $f == *macos-latest ]]
-            then
-              cp $(basename $f)/$(basename $f).dmg artifacts/vita3k-${{ env.Build_Variable }}-${{ env.Short_SHA }}_macos.dmg
-            else
-              if [[ $f == *ubuntu-22.04 ]]
-              then
-                if [[ $f == *appimage* ]]
-                then
-                  cp $(basename $f)/*.AppImage* artifacts/
-                else
-                  rm -f $(basename $f)/*.AppImage*
-                  echo "Compressing $f"
-                  7z a -mx=9 artifacts/vita3k-${{ env.Build_Variable }}-${{ env.Short_SHA }}_ubuntu.7z $(basename $f)
-                fi
-              else
-                echo "Compressing $f"
-                7z a -mx=9 artifacts/vita3k-${{ env.Build_Variable }}-${{ env.Short_SHA }}_windows.7z $(basename $f)
-              fi
-            fi
-          done
-          ls -al artifacts/
-          wget -c https://github.com/tcnksm/ghr/releases/download/v0.17.0/ghr_v0.17.0_linux_amd64.tar.gz
-          tar xfv ghr_v0.17.0_linux_amd64.tar.gz
-          ghr_v0.17.0_linux_amd64/ghr -u Vita3K -r Vita3K-builds  -n "Build: ${{ env.Build_Variable }}" -b "$(printf "Corresponding commit: [${{ env.Latest_Commit_Message }}](https://github.com/Vita3K/Vita3K/commit/${{ github.sha }}) (${{ env.Commiter_Name }})")" ${{ env.Build_Variable }} artifacts/
-        if: matrix.repo == 'store'
-        env:
-          GITHUB_TOKEN: ${{ secrets.STORE_TOKEN }}
