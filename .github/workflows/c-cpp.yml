@@ -75,13 +75,34 @@ jobs:
 
       - uses: ilammy/msvc-dev-cmd@v1
         if: matrix.os == 'windows-latest'
- 
+
+      # --- Cache step (stores only the .tar.zst) ---
       - uses: actions/cache@v4
         with:
-          path: ${{ matrix.cache_path }}
-          key: cache-${{ matrix.os }}-${{ matrix.config }}-${{ github.sha }}
+          path: cache_zstd
+          key: cache-zstd-${{ matrix.os }}-${{ matrix.config }}-${{ github.sha }}
           restore-keys: |
-            cache-${{ matrix.os }}-${{ matrix.config }}-
+            cache-zstd-${{ matrix.os }}-${{ matrix.config }}-
+
+      # --- Extraction after restoring cache ---
+      - name: Extract cache archive (zstd)
+        shell: bash
+        run: |
+          echo "Extracting cache for OS: ${{ matrix.os }}"
+          CACHE_PATH="${{ matrix.cache_path }}"
+          ARCHIVE_PATH="cache_zstd/cache-${{ matrix.os }}-${{ matrix.config }}.tar.zst"
+
+          if [[ -f "$ARCHIVE_PATH" ]]; then
+            echo "Decompressing $ARCHIVE_PATH ..."
+            mkdir -p "$(dirname "$CACHE_PATH")"
+            zstd -d -T0 "$ARCHIVE_PATH" -o cache_zstd/cache.tar
+            tar -xf cache_zstd/cache.tar -C /
+            rm -f cache_zstd/cache.tar
+            echo "Cache restored to $CACHE_PATH"
+          else
+            echo "No Zstd cache found to extract."
+          fi
+
 
       - name: Set up build environment (windows-latest)
         run: |
@@ -129,7 +150,39 @@ jobs:
 
       - name: Ccache statistics
         run: ccache -s  
-        
+
+      # --- Zstandard compression before caching ---
+      - name: Prepare cache archive (zstd)
+        shell: bash
+        run: |
+          echo "Preparing cache archive for OS: ${{ matrix.os }}"
+          mkdir -p cache_zstd
+          CACHE_PATH="${{ matrix.cache_path }}"
+          ARCHIVE_PATH="cache_zstd/cache-${{ matrix.os }}-${{ matrix.config }}.tar.zst"
+          echo "Target: $CACHE_PATH"
+
+          # Install zstd if missing
+          if ! command -v zstd &> /dev/null; then
+            echo "Installing zstd..."
+            if [[ "${{ runner.os }}" == "Windows" ]]; then
+              curl -L https://github.com/facebook/zstd/releases/latest/download/zstd.exe -o zstd.exe
+              mv zstd.exe /usr/bin/zstd
+            elif [[ "${{ runner.os }}" == "macOS" ]]; then
+              brew install zstd
+            else
+              sudo apt-get update && sudo apt-get install -y zstd
+            fi
+          fi
+
+          # Compress cache directory if it exists
+          if [[ -e $CACHE_PATH ]]; then
+            echo "Compressing $CACHE_PATH ..."
+            tar -cf - -C "$(dirname "$CACHE_PATH")" "$(basename "$CACHE_PATH")" | zstd -T0 -19 -o "$ARCHIVE_PATH"
+            du -sh "$ARCHIVE_PATH" || true
+          else
+            echo "No cache path found at $CACHE_PATH"
+          fi
+
       - name: Create DMG (macos-latest)
         run: |
           cd build/${{ matrix.cmake_preset }}/bin/${{ matrix.config }}
