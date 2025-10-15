@@ -28,26 +28,72 @@
 #include <SDL3/SDL_timer.h>
 
 namespace gui {
+// Callback with dynamic max chars
+static int UTF8LimitCallback(ImGuiInputTextCallbackData *data) {
+    int max_chars = *reinterpret_cast<int *>(data->UserData); // retrieve passed pointer
+
+    if (data->EventFlag == ImGuiInputTextFlags_CallbackEdit) {
+        int len = string_utils::count_utf8_chars(data->Buf);
+        if (len > max_chars) {
+            // Truncate safely
+            const unsigned char *s = reinterpret_cast<unsigned char *>(data->Buf);
+            int count = 0;
+            size_t pos = 0;
+
+            while (*s) {
+                size_t char_len = 0;
+                if (*s < 0x80)
+                    char_len = 1;
+                else if ((*s & 0xE0) == 0xC0)
+                    char_len = 2;
+                else if ((*s & 0xF0) == 0xE0)
+                    char_len = 3;
+                else if ((*s & 0xF8) == 0xF0)
+                    char_len = 4;
+                else
+                    break;
+
+                if (count + 1 > max_chars)
+                    break;
+
+                s += char_len;
+                pos += char_len;
+                count++;
+            }
+
+            if (data->Buf[pos] != '\0') {
+                char *buf = data->Buf;
+                buf[pos] = '\0';
+                memset(buf + pos + 1, 0, data->BufTextLen - pos - 1);
+
+                data->BufDirty = true;
+                data->CursorPos = static_cast<int>(pos);
+            }
+        }
+    }
+    return 0;
+}
+
 static void draw_ime_dialog(DialogState &common_dialog, float FONT_SCALE) {
     ImGui::SetNextWindowSize(ImVec2(0, 0));
     ImGui::Begin("##ime_dialog", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::SetWindowFontScale(FONT_SCALE);
     TextColoredCentered(GUI_COLOR_TEXT_TITLE, common_dialog.ime.title);
     ImGui::Spacing();
-    // TODO: setting the bufsize to max_length + 1 is not correct (except when using only 1-byte UTF-8 characters)
-    // the reason being that the max_length is the number of characters allowed but the parameter given to ImGui::InputTextMultiline/ImGui::InputText
-    // is the size of the buffer, which includes the ending 0 (+1). However, as characters can have a variable size using UTF-8,
-    // this will not necessarily match the max_length (but be at most it)
     if (common_dialog.ime.multiline) {
         ImGui::InputTextMultiline(
             "##ime_dialog_multiline",
             common_dialog.ime.text,
-            common_dialog.ime.max_length + 1);
+            common_dialog.ime.max_length + 1,
+            ImVec2(0, 0));
     } else {
         ImGui::InputText(
             "##ime_dialog_singleline",
             common_dialog.ime.text,
-            common_dialog.ime.max_length + 1);
+            SCE_IME_MAX_TEXT_LENGTH,
+            ImGuiInputTextFlags_CallbackEdit,
+            UTF8LimitCallback,
+            &common_dialog.ime.max_length);
     }
     ImGui::SameLine();
     auto &common = common_dialog.lang.common;

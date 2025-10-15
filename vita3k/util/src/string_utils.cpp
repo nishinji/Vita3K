@@ -151,4 +151,23 @@ int stoi_def(const std::string &str, int default_value, const char *name) {
     return default_value;
 }
 
+int count_utf8_chars(const char *str) {
+    int count = 0;
+    const unsigned char *s = reinterpret_cast<const unsigned char *>(str);
+    while (*s) {
+        if (*s < 0x80)
+            s += 1;
+        else if ((*s & 0xE0) == 0xC0 && (s[1] & 0xC0) == 0x80)
+            s += 2;
+        else if ((*s & 0xF0) == 0xE0 && (s[1] & 0xC0) == 0x80 && (s[2] & 0xC0) == 0x80)
+            s += 3;
+        else if ((*s & 0xF8) == 0xF0 && (s[1] & 0xC0) == 0x80 && (s[2] & 0xC0) == 0x80 && (s[3] & 0xC0) == 0x80)
+            s += 4;
+        else
+            break;
+        count++;
+    }
+    return count;
+}
+
 } // namespace string_utils

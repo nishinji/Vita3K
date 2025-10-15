@@ -35,5 +35,6 @@ std::vector<uint8_t> string_to_byte_array(const std::string &string);
 std::string toupper(const std::string &s);
 std::string tolower(const std::string &s);
 int stoi_def(const std::string &str, int default_value = 0, const char *name = "value");
+int count_utf8_chars(const char *str);
 
 } // namespace string_utils
