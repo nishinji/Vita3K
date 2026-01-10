@@ -60,6 +60,17 @@
       "generator": "Ninja Multi-Config"
     },
     {
+      "name": "windows-arm64-ninja",
+      "inherits": "windows",
+      "displayName": "Windows with Ninja",
+      "description": "Windows native build using Ninja Multi-Config and default compiler",
+      "generator": "Ninja Multi-Config",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl"
+      }
+    },
+    {
       "name": "windows-ninja-clang",
       "inherits": "windows-ninja",
       "displayName": "Windows with Ninja and Clang",

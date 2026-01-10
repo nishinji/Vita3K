@@ -41,12 +41,22 @@ jobs:
             extra_cmake_args: -DLINUXDEPLOY_COMMAND=/usr/local/bin/linuxdeploy-aarch64.AppImage
             cmake_preset: linux-ninja-clang-appimage
           - os: windows-latest
+            arch: x86_64
             cache_path: |
                 C:\vcpkg\installed
                 C:\vcpkg\packages
                 C:\Users\runneradmin\AppData\Local\ccache
             extra_cmake_args: -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
             cmake_preset: windows-ninja
+          - os: windows-11-arm
+            runs_on: windows-11-arm
+            arch: arm64
+            cache_path: |
+                C:\vcpkg\installed
+                C:\vcpkg\packages
+                C:\Users\runneradmin\AppData\Local\ccache
+            extra_cmake_args: -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake -DVCPKG_TARGET_TRIPLET=arm64-windows-static-md
+            cmake_preset: windows-arm64-ninja
           - os: macos-latest
             cache_path: ~/Library/Caches/ccache
             extra_cmake_args: -DCMAKE_OSX_ARCHITECTURES="x86_64" -DFORCE_BUILD_OPENSSL_MAC=ON -DVITA3K_FORCE_CUSTOM_BOOST=ON
@@ -81,14 +91,19 @@ jobs:
           sudo chmod +x /usr/local/bin/linuxdeploy-${{ matrix.arch }}.AppImage
         if: startsWith(matrix.os, 'ubuntu')
 
-      - name: Set up build environment (Windows)
+      - name: Set up build environment (windows)
+        shell: bash
         run: |
-          vcpkg install zlib:x64-windows-static-md boost-system:x64-windows-static-md boost-filesystem:x64-windows-static-md boost-program-options:x64-windows-static-md boost-icl:x64-windows-static-md boost-variant:x64-windows-static-md curl:x64-windows-static-md openssl:x64-windows-static-md
+          if [[ "${{ matrix.arch }}" == "arm64" ]]; then
+            vcpkg install zlib:arm64-windows-static-md boost-system:arm64-windows-static-md boost-filesystem:arm64-windows-static-md boost-program-options:arm64-windows-static-md boost-icl:arm64-windows-static-md boost-variant:arm64-windows-static-md curl:arm64-windows-static-md openssl:arm64-windows-static-md
+          else
+            vcpkg install zlib:x64-windows-static-md boost-system:x64-windows-static-md boost-filesystem:x64-windows-static-md boost-program-options:x64-windows-static-md boost-icl:x64-windows-static-md boost-variant:x64-windows-static-md curl:x64-windows-static-md openssl:x64-windows-static-md
+          fi
           choco install ccache
-        if: matrix.os == 'windows-latest'
+        if: startsWith(matrix.os, 'windows')
 
       - uses: ilammy/msvc-dev-cmd@v1
-        if: matrix.os == 'windows-latest'
+        if: startsWith(matrix.os, 'windows')
 
       - name: Set up build environment (Android)
         run: |
@@ -288,6 +303,10 @@ jobs:
               echo "Processing $dir (Windows)"
               (cd $dir && zip -r ../artifacts-master/windows-latest.zip *)
               7z a -mx=9 artifacts-store/vita3k-${{ env.BUILD_VARIABLE }}-${{ env.GIT_SHORT_SHA }}_windows.7z $dir
+            elif [[ $dir == *-windows-arm64 ]]; then
+              echo "Processing $dir (Windows ARM64)"
+              (cd $dir && zip -r ../artifacts-master/windows-arm64-latest.zip *)
+              7z a -mx=9 artifacts-store/vita3k-${{ env.Build_Variable }}-${{ env.Short_SHA }}_windows-arm64.7z $dir
             fi
           done
           echo "=== artifacts-master ==="
