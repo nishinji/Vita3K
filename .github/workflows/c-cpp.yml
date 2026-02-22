@@ -10,7 +10,8 @@ on:
 
 env:
   BUILD_CONFIG: Release
-  SCCACHE_GHA_ENABLED: "true"
+  # SCCACHE_GHA_ENABLED: "true"
+  SCCACHE_DIR: ${{ github.workspace }}/.sccache
 
 jobs:
   format-check:
@@ -88,6 +89,13 @@ jobs:
           restore-keys: |
             cache-${{ matrix.os }}-${{ env.BUILD_CONFIG }}-
         if: startsWith(matrix.os, 'windows') || startsWith(matrix.os, 'macos')
+
+      - uses: actions/cache@v5
+        with:
+          path: ${{ env.SCCACHE_DIR }}
+          key: sccache-${{ matrix.os }}-${{ matrix.arch }}-${{ env.BUILD_CONFIG }}-${{ hashFiles('**/CMakeLists.txt') }}
+          restore-keys: |
+            sccache-${{ matrix.os }}-${{ matrix.arch }}-${{ env.BUILD_CONFIG }}-
 
       - name: Set up build environment (macOS)
         run: |
