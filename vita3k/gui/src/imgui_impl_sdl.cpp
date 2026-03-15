@@ -48,6 +48,22 @@ static void ImGui_ImplSdl_SetClipboardText(ImGuiContext *, const char *text) {
     SDL_SetClipboardText(text);
 }
 
+static void ImGui_ImplSDL3_SetImeData(ImGuiContext *, ImGuiViewport *viewport, ImGuiPlatformImeData *data) {
+    SDL_WindowID window_id = (SDL_WindowID)(intptr_t)viewport->PlatformHandle;
+    SDL_Window *window = SDL_GetWindowFromID(window_id);
+    if (!window)
+        return;
+
+    if (data->WantVisible) {
+        SDL_Rect r;
+        r.x = (int)(data->InputPos.x - viewport->Pos.x);
+        r.y = (int)(data->InputPos.y - viewport->Pos.y);
+        r.w = 1;
+        r.h = (int)(data->InputLineHeight);
+        SDL_SetTextInputArea(window, &r, 0);
+    }
+}
+
 static ImGuiKey ImGui_ImplSDL3_KeycodeToImGuiKey(SDL_Keycode keycode) {
     switch (keycode) {
     case SDLK_TAB: return ImGuiKey_Tab;
@@ -286,7 +302,7 @@ IMGUI_API ImGui_State *ImGui_ImplSdl_Init(renderer::State *renderer, SDL_Window 
     platform_io.Platform_SetClipboardTextFn = ImGui_ImplSdl_SetClipboardText;
     platform_io.Platform_GetClipboardTextFn = ImGui_ImplSdl_GetClipboardText;
     platform_io.Platform_ClipboardUserData = nullptr;
-    platform_io.Platform_SetImeDataFn = nullptr;
+    platform_io.Platform_SetImeDataFn = ImGui_ImplSDL3_SetImeData;
 
     // Load mouse cursors
     state->mouse_cursors[ImGuiMouseCursor_Arrow] = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_DEFAULT);
