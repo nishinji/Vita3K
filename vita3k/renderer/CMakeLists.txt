@@ -53,6 +53,21 @@ if(ANDROID)
 	target_link_libraries(renderer PRIVATE android adrenotools)
 endif()
 
+if(APPLE)
+	target_sources(renderer PRIVATE src/vulkan/metal_layer.mm)
+	target_link_libraries(renderer PRIVATE "-framework QuartzCore" "-framework Cocoa")
+endif()
+
+if(X11_FOUND)
+	target_link_libraries(renderer PRIVATE ${X11_LIBRARIES})
+	target_include_directories(renderer PRIVATE ${X11_INCLUDE_DIR})
+endif()
+
+if(WAYLAND_FOUND)
+	target_link_libraries(renderer PRIVATE ${WAYLAND_LIBRARIES})
+	target_include_directories(renderer PRIVATE ${WAYLAND_INCLUDE_DIRS})
+endif()
+
 if ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
 	# silence all vma warnings
 	target_compile_options(renderer PRIVATE "-Wno-nullability-completeness")

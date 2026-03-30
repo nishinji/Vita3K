@@ -30,10 +30,6 @@
 #include <memory>
 #include <vector>
 
-typedef struct SDL_GLContextState *SDL_GLContext;
-
-typedef std::unique_ptr<SDL_GLContextState, std::function<void(SDL_GLContext)>> GLContextPtr;
-
 struct SceGxmProgramParameter;
 
 namespace renderer::gl {

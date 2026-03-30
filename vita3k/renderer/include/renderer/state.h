@@ -22,11 +22,13 @@
 #include <renderer/types.h>
 #include <threads/queue.h>
 
+#include <atomic>
 #include <condition_variable>
+#include <functional>
 #include <mutex>
 #include <string_view>
+#include <thread>
 
-struct SDL_Window;
 struct DisplayState;
 struct GxmState;
 struct Config;
@@ -40,6 +42,27 @@ enum struct MappingMethod : int {
 };
 
 namespace renderer {
+
+enum struct DisplayProtocol {
+    Unknown,
+    Win32,
+    MacOS,
+    X11,
+    Wayland
+};
+
+struct WindowCallbacks {
+    std::function<void *(const char *)> get_proc_address;
+    std::function<unsigned int()> default_fbo;
+    std::function<void()> swap;
+    std::function<bool()> set_current;
+    std::function<void()> done_current;
+    std::function<int()> client_width;
+    std::function<int()> client_height;
+    void *native_handle = nullptr;
+    void *native_display = nullptr;
+    DisplayProtocol display_protocol = DisplayProtocol::Unknown;
+};
 
 class TextureCache;
 
@@ -58,6 +81,8 @@ struct State {
     fs::path static_assets;
     fs::path shaders_path;
     fs::path shaders_log_path;
+
+    WindowCallbacks window_callbacks;
 
     Backend current_backend;
 #ifdef __ANDROID__
@@ -91,6 +116,9 @@ struct State {
 
     bool should_display;
 
+    std::unique_ptr<std::thread> render_thread;
+    std::atomic<bool> render_abort{false};
+
     // only support disabled by default
     int supported_mapping_methods_mask = 1;
     MappingMethod mapping_method = MappingMethod::Disabled;
@@ -104,10 +132,10 @@ struct State {
 
     virtual TextureCache *get_texture_cache() = 0;
 
-    virtual void render_frame(const SceFVector2 &viewport_pos, const SceFVector2 &viewport_size, DisplayState &display,
-        const GxmState &gxm, MemState &mem)
-        = 0;
-    virtual void swap_window(SDL_Window *window) = 0;
+    virtual void render_frame(DisplayState &display, const GxmState &gxm, MemState &mem) = 0;
+    virtual void swap_window() = 0;
+    virtual void set_current() {}
+    virtual void done_current() {}
     // perform a screenshot of the (upscaled) frame to be rendered and return it in a vector in its rgba8 format
     virtual std::vector<uint32_t> dump_frame(DisplayState &display, uint32_t &width, uint32_t &height) = 0;
     // return a mask of the features which can influence the compiled shaders

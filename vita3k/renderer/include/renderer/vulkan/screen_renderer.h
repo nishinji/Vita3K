@@ -23,8 +23,6 @@
 
 #include <memory>
 
-struct SDL_Window;
-
 namespace renderer::vulkan {
 
 struct VKState;
@@ -32,7 +30,6 @@ struct VKState;
 class ScreenRenderer {
 public:
     VKState &state;
-    SDL_Window *window{};
 
     vk::SurfaceKHR surface;
     vk::SwapchainKHR swapchain;
@@ -78,7 +75,7 @@ public:
 
     ScreenRenderer(VKState &state);
 
-    bool create(SDL_Window *window);
+    bool create();
     // called after the logical device has been created
     bool setup();
     void cleanup();

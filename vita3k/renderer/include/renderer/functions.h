@@ -20,10 +20,13 @@
 #include <renderer/commands.h>
 #include <renderer/types.h>
 
+#include <string>
+
 struct MemState;
 struct FeatureState;
 struct Config;
-struct SDL_Window;
+struct DisplayState;
+struct GxmState;
 
 namespace renderer {
 struct Context;
@@ -31,6 +34,7 @@ struct FragmentProgram;
 struct RenderTarget;
 struct State;
 struct VertexProgram;
+struct WindowCallbacks;
 
 bool create(std::unique_ptr<FragmentProgram> &fp, State &state, const SceGxmProgram &program, const SceGxmBlendInfo *blend, GXPPtrMap &gxp_ptr_map);
 bool create(std::unique_ptr<VertexProgram> &vp, State &state, const SceGxmProgram &program, GXPPtrMap &gxp_ptr_map, const std::vector<SceGxmVertexAttribute> &attributes);
@@ -58,7 +62,9 @@ void submit_command_list(State &state, renderer::Context *context, CommandList &
 bool is_cmd_ready(MemState &mem, CommandList &command_list);
 void process_batch(State &state, MemState &mem, Config &config, CommandList &command_list);
 void process_batches(State &state, const FeatureState &features, MemState &mem, Config &config);
-bool init(SDL_Window *window, std::unique_ptr<State> &state, Backend backend, const Config &config, const Root &root_paths);
+void start_render_thread(State &state, DisplayState &display, GxmState &gxm, MemState &mem, Config &config);
+void stop_render_thread(State &state);
+bool init(const WindowCallbacks &callbacks, std::unique_ptr<State> &state, Backend backend, const Config &config, const Root &root_paths);
 
 void set_depth_bias(State &state, Context *ctx, bool is_front, int factor, int units);
 void set_depth_func(State &state, Context *ctx, bool is_front, SceGxmDepthFunc depth_func);
@@ -144,6 +150,8 @@ int send_single_command(State &state, Context *ctx, const CommandOpcode opcode, 
     else
         return 0;
 }
+
+std::vector<std::string> enumerate_vulkan_gpu_names();
 
 namespace texture {
 

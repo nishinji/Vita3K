@@ -33,8 +33,6 @@
 #include <util/log.h>
 #include <vkutil/vkutil.h>
 
-#include <SDL3/SDL_vulkan.h>
-
 #ifdef __APPLE__
 #include <MoltenVK/mvk_vulkan.h>
 #endif
@@ -277,10 +275,10 @@ static std::string get_driver_version(uint32_t vendor_id, uint32_t version_raw) 
     return fmt::format("{}.{}.{}", (version_raw >> 22) & 0x3ff, (version_raw >> 12) & 0x3ff, version_raw & 0xfff);
 }
 
-bool create(SDL_Window *window, std::unique_ptr<renderer::State> &state, const Config &config) {
+bool create(std::unique_ptr<renderer::State> &state, const Config &config) {
     auto &vk_state = dynamic_cast<VKState &>(*state);
 
-    return vk_state.create(window, state, config);
+    return vk_state.create(state, config);
 }
 
 VKState::VKState(int gpu_idx)
@@ -373,17 +371,16 @@ static void *load_custom_adreno_driver(const std::string &driver_name) {
 }
 #endif
 
-bool VKState::create(SDL_Window *window, std::unique_ptr<renderer::State> &state, const Config &config) {
+bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &config) {
     // Create Instance
     {
-        PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(SDL_Vulkan_GetVkGetInstanceProcAddr());
-        VULKAN_HPP_DEFAULT_DISPATCHER.init(vkGetInstanceProcAddr);
+        VULKAN_HPP_DEFAULT_DISPATCHER.init();
 
 #ifdef __ANDROID__
         if (!config.current_config.custom_driver_name.empty()) {
             void *vulkan_handle = load_custom_adreno_driver(config.current_config.custom_driver_name);
             if (vulkan_handle) {
-                vkGetInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(dlsym(vulkan_handle, "vkGetInstanceProcAddr"));
+                PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(dlsym(vulkan_handle, "vkGetInstanceProcAddr"));
                 VULKAN_HPP_DEFAULT_DISPATCHER.init(vkGetInstanceProcAddr);
                 LOG_INFO("Custom Adreno driver {} injected successfully", config.current_config.custom_driver_name);
             }
@@ -401,19 +398,39 @@ bool VKState::create(SDL_Window *window, std::unique_ptr<renderer::State> &state
             .apiVersion = VK_API_VERSION_1_0
         };
 
-        unsigned int instance_req_ext_count;
-        auto instance_extensions_str = SDL_Vulkan_GetInstanceExtensions(&instance_req_ext_count);
         std::vector<const char *> instance_extensions;
-        instance_extensions.reserve(instance_req_ext_count + 6);
-        for (size_t i = 0; i < instance_req_ext_count; i++) {
-            instance_extensions.push_back(instance_extensions_str[i]);
+        instance_extensions.reserve(8);
+        instance_extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
+#ifdef _WIN32
+        instance_extensions.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
+#elif defined(__APPLE__)
+        instance_extensions.push_back(VK_EXT_METAL_SURFACE_EXTENSION_NAME);
+#elif defined(__ANDROID__)
+        instance_extensions.push_back(VK_KHR_ANDROID_SURFACE_EXTENSION_NAME);
+#else
+        {
+            bool found_surface_ext = false;
+            const auto available_extensions = vk::enumerateInstanceExtensionProperties();
+            for (const auto &ext : available_extensions) {
+                const std::string_view name(ext.extensionName.data());
+#if defined(HAVE_X11)
+                if (name == VK_KHR_XLIB_SURFACE_EXTENSION_NAME) {
+                    instance_extensions.push_back(VK_KHR_XLIB_SURFACE_EXTENSION_NAME);
+                    found_surface_ext = true;
+                }
+#endif
+#if defined(HAVE_WAYLAND)
+                if (name == VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME) {
+                    instance_extensions.push_back(VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME);
+                    found_surface_ext = true;
+                }
+#endif
+            }
+            if (!found_surface_ext) {
+                LOG_ERROR("Could not find a supported Vulkan surface extension (need X11 or Wayland)");
+                return false;
+            }
         }
-
-#ifdef __APPLE__
-        // VK_KHR_portability_enumeration is a Vulkan Loader extension automatically added by SDL_Vulkan_GetInstanceExtensions.
-        // When using MoltenVK directly without the Vulkan Loader, this extension causes an instant crash on startup.
-        // Remove it from the default instance_extensions and handle it separately in the optional extensions.
-        std::erase(instance_extensions, vk::KHRPortabilityEnumerationExtensionName);
 #endif
 
         const std::set<std::string> optional_instance_extensions = {
@@ -522,7 +539,7 @@ bool VKState::create(SDL_Window *window, std::unique_ptr<renderer::State> &state
     }
 
     // Create Surface
-    if (!screen_renderer.create(window))
+    if (!screen_renderer.create())
         return false;
 
     // Select Physical Device
@@ -979,8 +996,7 @@ void VKState::cleanup() {
     instance.destroy();
 }
 
-void VKState::render_frame(const SceFVector2 &viewport_pos, const SceFVector2 &viewport_size, DisplayState &display,
-    const GxmState &gxm, MemState &mem) {
+void VKState::render_frame(DisplayState &display, const GxmState &gxm, MemState &mem) {
     // we are displaying this frame, wait for a new one
     should_display = false;
 
@@ -995,6 +1011,37 @@ void VKState::render_frame(const SceFVector2 &viewport_pos, const SceFVector2 &v
 
     if (!screen_renderer.acquire_swapchain_image())
         return;
+
+    // store viewport for touch
+    {
+        const float fb_w = static_cast<float>(screen_renderer.extent.width);
+        const float fb_h = static_cast<float>(screen_renderer.extent.height);
+        display.viewport_drawable_w = static_cast<int>(fb_w);
+        display.viewport_drawable_h = static_cast<int>(fb_h);
+        if (fb_h > 0.0f) {
+            const float window_aspect = fb_w / fb_h;
+            constexpr float vita_aspect = static_cast<float>(DEFAULT_RES_WIDTH) / DEFAULT_RES_HEIGHT;
+            const bool pixel_perfect = fullscreen_hd_res_pixel_perfect && fullscreen
+                && !(screen_renderer.extent.width % DEFAULT_RES_WIDTH)
+                && !(screen_renderer.extent.height % (DEFAULT_RES_HEIGHT - 4));
+            if (stretch_the_display_area && !pixel_perfect) {
+                display.viewport_x = 0.0f;
+                display.viewport_y = 0.0f;
+                display.viewport_w = fb_w;
+                display.viewport_h = fb_h;
+            } else if ((window_aspect > vita_aspect) && !pixel_perfect) {
+                display.viewport_w = fb_h * vita_aspect;
+                display.viewport_h = fb_h;
+                display.viewport_x = (fb_w - display.viewport_w) / 2.0f;
+                display.viewport_y = 0.0f;
+            } else {
+                display.viewport_w = fb_w;
+                display.viewport_h = fb_w / vita_aspect;
+                display.viewport_x = 0.0f;
+                display.viewport_y = (fb_h - display.viewport_h) / 2.0f;
+            }
+        }
+    }
 
     // Check if the surface exists
     Viewport viewport;
@@ -1048,7 +1095,7 @@ void VKState::render_frame(const SceFVector2 &viewport_pos, const SceFVector2 &v
     screen_renderer.render(surface_handle, layout, viewport);
 }
 
-void VKState::swap_window(SDL_Window *window) {
+void VKState::swap_window() {
     screen_renderer.swap_window();
 
     // look once a frame if we need to save the pipeline cache
@@ -1471,6 +1518,57 @@ uint32_t VKState::get_gpu_version() {
 std::string_view VKState::get_gpu_name() {
     return physical_device_properties.deviceName.data();
 }
+
+} // namespace renderer::vulkan
+
+std::vector<std::string> renderer::enumerate_vulkan_gpu_names() {
+    std::vector<std::string> gpu_list;
+    gpu_list.emplace_back("Automatic");
+
+    try {
+        VULKAN_HPP_DEFAULT_DISPATCHER.init();
+
+        vk::ApplicationInfo app_info{
+            .apiVersion = VK_API_VERSION_1_0
+        };
+
+        std::vector<const char *> extensions;
+#ifdef __APPLE__
+        for (const vk::ExtensionProperties &prop : vk::enumerateInstanceExtensionProperties()) {
+            if (std::string_view(prop.extensionName.data()) == vk::KHRPortabilityEnumerationExtensionName) {
+                extensions.push_back(vk::KHRPortabilityEnumerationExtensionName);
+                break;
+            }
+        }
+#endif
+
+        vk::InstanceCreateInfo instance_info{
+#ifdef __APPLE__
+            .flags = extensions.empty() ? vk::InstanceCreateFlags{} : vk::InstanceCreateFlagBits::eEnumeratePortabilityKHR,
+#endif
+            .pApplicationInfo = &app_info,
+        };
+        instance_info.setPEnabledExtensionNames(extensions);
+
+        vk::UniqueInstance instance = vk::createInstanceUnique(instance_info);
+
+        VULKAN_HPP_DEFAULT_DISPATCHER.vkEnumeratePhysicalDevices = reinterpret_cast<PFN_vkEnumeratePhysicalDevices>(
+            VULKAN_HPP_DEFAULT_DISPATCHER.vkGetInstanceProcAddr(instance.get(), "vkEnumeratePhysicalDevices"));
+        VULKAN_HPP_DEFAULT_DISPATCHER.vkGetPhysicalDeviceProperties = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties>(
+            VULKAN_HPP_DEFAULT_DISPATCHER.vkGetInstanceProcAddr(instance.get(), "vkGetPhysicalDeviceProperties"));
+        VULKAN_HPP_DEFAULT_DISPATCHER.vkDestroyInstance = reinterpret_cast<PFN_vkDestroyInstance>(
+            VULKAN_HPP_DEFAULT_DISPATCHER.vkGetInstanceProcAddr(instance.get(), "vkDestroyInstance"));
+
+        for (const vk::PhysicalDevice &gpu : instance->enumeratePhysicalDevices())
+            gpu_list.emplace_back(gpu.getProperties().deviceName.data());
+    } catch (const std::exception &e) {
+        LOG_WARN("Vulkan GPU enumeration failed: {}", e.what());
+    }
+
+    return gpu_list;
+}
+
+namespace renderer::vulkan {
 
 void VKState::precompile_shader(const ShadersHash &hash) {
     Sha256Hash empty_hash{};

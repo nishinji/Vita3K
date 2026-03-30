@@ -24,8 +24,16 @@
 #include <renderer/vulkan/types.h>
 
 #include <config/state.h>
+#include <display/state.h>
 #include <functional>
 #include <util/log.h>
+
+#include <memory>
+#include <thread>
+
+#ifdef TRACY_ENABLE
+#include <tracy/Tracy.hpp>
+#endif
 
 struct FeatureState;
 
@@ -154,4 +162,41 @@ void reset_command_list(CommandList &command_list) {
     command_list.first = nullptr;
     command_list.last = nullptr;
 }
+
+static void render_loop(renderer::State &state, DisplayState &display, GxmState &gxm, MemState &mem, Config &config) {
+    state.set_current();
+
+    while (!state.render_abort.load(std::memory_order_relaxed)) {
+#ifdef TRACY_ENABLE
+        ZoneScopedN("Game rendering");
+#endif
+        process_batches(state, state.features, mem, config);
+
+        if (state.render_abort.load(std::memory_order_relaxed))
+            break;
+
+        state.render_frame(display, gxm, mem);
+        state.swap_window();
+
+#ifdef TRACY_ENABLE
+        FrameMark;
+#endif
+    }
+
+    state.done_current();
+}
+
+void start_render_thread(State &state, DisplayState &display, GxmState &gxm, MemState &mem, Config &config) {
+    state.render_abort = false;
+    state.render_thread = std::make_unique<std::thread>(render_loop, std::ref(state), std::ref(display), std::ref(gxm), std::ref(mem), std::ref(config));
+}
+
+void stop_render_thread(State &state) {
+    state.render_abort = true;
+    state.command_buffer_queue.abort();
+    if (state.render_thread && state.render_thread->joinable())
+        state.render_thread->join();
+    state.render_thread.reset();
+}
+
 } // namespace renderer

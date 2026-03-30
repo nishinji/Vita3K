@@ -17,11 +17,22 @@
 
 #include "renderer/vulkan/screen_renderer.h"
 
-#include <SDL3/SDL_vulkan.h>
-
 #include "renderer/vulkan/state.h"
 #include "util/log.h"
 #include "vkutil/vkutil.h"
+
+#ifdef _WIN32
+#include <vulkan/vulkan_win32.h>
+#elif defined(__APPLE__)
+#include <vulkan/vulkan_metal.h>
+extern "C" void *get_metal_layer_from_view(void *nsview);
+#if defined(HAVE_X11)
+#include <vulkan/vulkan_xlib.h>
+#endif
+#if defined(HAVE_WAYLAND)
+#include <vulkan/vulkan_wayland.h>
+#endif
+#endif
 
 #ifdef __ANDROID__
 #include <SDL3/SDL.h>
@@ -43,21 +54,61 @@ ScreenRenderer::ScreenRenderer(VKState &state)
     : state(state) {
 }
 
-bool ScreenRenderer::create(SDL_Window *window) {
+bool ScreenRenderer::create() {
     if (this->surface) {
         state.instance.destroySurfaceKHR(this->surface);
         this->surface = nullptr;
     }
 
-    VkSurfaceKHR surface = VK_NULL_HANDLE;
-    bool surface_error = SDL_Vulkan_CreateSurface(window, state.instance, nullptr, &surface);
-    if (!surface_error) {
-        const char *error = SDL_GetError();
-        LOG_ERROR("Failed to create vulkan surface. SDL Error: {}.", error);
+#ifdef _WIN32
+    vk::Win32SurfaceCreateInfoKHR create_info{};
+    create_info.hinstance = GetModuleHandle(nullptr);
+    create_info.hwnd = reinterpret_cast<HWND>(state.window_callbacks.native_handle);
+    this->surface = state.instance.createWin32SurfaceKHR(create_info);
+#elif defined(__APPLE__)
+    {
+        void *metal_layer = get_metal_layer_from_view(state.window_callbacks.native_handle);
+        if (!metal_layer) {
+            LOG_ERROR("Failed to get CAMetalLayer from NSView");
+            return false;
+        }
+        vk::MetalSurfaceCreateInfoEXT create_info{};
+        create_info.pLayer = static_cast<const CAMetalLayer *>(metal_layer);
+        this->surface = state.instance.createMetalSurfaceEXT(create_info);
+    }
+#elif defined(__ANDROID__)
+    LOG_ERROR("No android yet (ever).");
+    return false;
+#else
+    switch (state.window_callbacks.display_protocol) {
+#if defined(HAVE_X11)
+    case renderer::DisplayProtocol::X11: {
+        vk::XlibSurfaceCreateInfoKHR create_info{};
+        create_info.dpy = static_cast<Display *>(state.window_callbacks.native_display);
+        create_info.window = reinterpret_cast<Window>(state.window_callbacks.native_handle);
+        this->surface = state.instance.createXlibSurfaceKHR(create_info);
+        break;
+    }
+#endif
+#if defined(HAVE_WAYLAND)
+    case renderer::DisplayProtocol::Wayland: {
+        vk::WaylandSurfaceCreateInfoKHR create_info{};
+        create_info.display = static_cast<struct wl_display *>(state.window_callbacks.native_display);
+        create_info.surface = static_cast<struct wl_surface *>(state.window_callbacks.native_handle);
+        this->surface = state.instance.createWaylandSurfaceKHR(create_info);
+        break;
+    }
+#endif
+    default:
+        LOG_ERROR("Unsupported display protocol on Linux");
         return false;
     }
-    this->window = window;
-    this->surface = vk::SurfaceKHR(surface);
+#endif
+
+    if (!this->surface) {
+        LOG_ERROR("Failed to create Vulkan surface from native window handle");
+        return false;
+    }
 
     return true;
 }
@@ -121,8 +172,8 @@ void ScreenRenderer::create_swapchain() {
     if (surface_capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
         extent = surface_capabilities.currentExtent;
     } else {
-        int width, height;
-        SDL_GetWindowSizeInPixels(window, &width, &height);
+        int width = state.window_callbacks.client_width ? state.window_callbacks.client_width() : 0;
+        int height = state.window_callbacks.client_height ? state.window_callbacks.client_height() : 0;
         extent.width = std::clamp<uint32_t>(width, surface_capabilities.minImageExtent.width, surface_capabilities.maxImageExtent.width);
         extent.height = std::clamp<uint32_t>(height, surface_capabilities.minImageExtent.height, surface_capabilities.maxImageExtent.height);
     }
@@ -281,7 +332,7 @@ bool ScreenRenderer::acquire_swapchain_image(bool start_render_pass) {
             || acquire_result == vk::Result::eSuboptimalKHR
             || acquire_result == vk::Result::eErrorSurfaceLostKHR) {
             if (acquire_result == vk::Result::eErrorSurfaceLostKHR) {
-                create(this->window);
+                create();
             }
 
             auto rebuilt = rebuild_swapchain_if_visible();
@@ -400,8 +451,8 @@ void ScreenRenderer::swap_window() {
 
     auto result = state.general_queue.presentKHR(&present_info);
     if (result == vk::Result::eSuboptimalKHR) {
-        int width, height;
-        SDL_GetWindowSizeInPixels(window, &width, &height);
+        int width = state.window_callbacks.client_width ? state.window_callbacks.client_width() : 0;
+        int height = state.window_callbacks.client_height ? state.window_callbacks.client_height() : 0;
 
         if (width != extent.width || height != extent.height) {
             state.device.waitIdle();
@@ -545,8 +596,8 @@ void ScreenRenderer::create_surface_image() {
 bool ScreenRenderer::rebuild_swapchain_if_visible() {
     state.device.waitIdle();
     destroy_swapchain();
-    int width, height;
-    SDL_GetWindowSizeInPixels(window, &width, &height);
+    int width = state.window_callbacks.client_width ? state.window_callbacks.client_width() : 0;
+    int height = state.window_callbacks.client_height ? state.window_callbacks.client_height() : 0;
     // don't render anything when the window is minimized
     if (width == 0 || height == 0)
         return false;
@@ -559,8 +610,8 @@ bool ScreenRenderer::rebuild_swapchain_if_visible() {
 }
 
 bool ScreenRenderer::surface_matches_window_size() {
-    int width, height;
-    SDL_GetWindowSizeInPixels(window, &width, &height);
+    int width = state.window_callbacks.client_width ? state.window_callbacks.client_width() : 0;
+    int height = state.window_callbacks.client_height ? state.window_callbacks.client_height() : 0;
     // if we're minimized, assume the current size is OK
     if (width == 0 || height == 0)
         return true;

@@ -29,8 +29,6 @@
 
 namespace renderer::gl {
 struct GLState : public renderer::State {
-    GLContextPtr context;
-
     ShaderCache fragment_shader_cache;
     ShaderCache vertex_shader_cache;
     ProgramCache program_cache;
@@ -40,6 +38,9 @@ struct GLState : public renderer::State {
 
     ScreenRenderer screen_renderer;
 
+    int client_width() const;
+    int client_height() const;
+
     bool init() override;
     void late_init(const Config &cfg, const std::string_view game_id, MemState &mem) override;
 
@@ -47,9 +48,10 @@ struct GLState : public renderer::State {
         return &texture_cache;
     }
 
-    void render_frame(const SceFVector2 &viewport_pos, const SceFVector2 &viewport_size, DisplayState &display,
-        const GxmState &gxm, MemState &mem) override;
-    void swap_window(SDL_Window *window) override;
+    void render_frame(DisplayState &display, const GxmState &gxm, MemState &mem) override;
+    void swap_window() override;
+    void set_current() override;
+    void done_current() override;
     std::vector<uint32_t> dump_frame(DisplayState &display, uint32_t &width, uint32_t &height) override;
 
     int get_supported_filters() override;

@@ -34,7 +34,9 @@
 #include <gxm/types.h>
 #include <util/log.h>
 
-#include <SDL3/SDL_video.h>
+#ifdef _WIN32
+#include <Windows.h>
+#endif
 
 #include <array>
 #include <mutex>
@@ -165,51 +167,18 @@ static void debug_output_callback(GLenum source, GLenum type, GLuint id, GLenum 
 }
 #endif
 
-bool create(SDL_Window *window, std::unique_ptr<State> &state, const Config &config) {
+bool create(std::unique_ptr<State> &state, const Config &config) {
     auto &gl_state = dynamic_cast<GLState &>(*state);
-#ifndef NDEBUG
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
-#endif
-
-    int choosen_minor_version = 0;
-
-#ifdef __ANDROID__
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
-
-    gl_state.context = GLContextPtr(SDL_GL_CreateContext(window), [](SDL_GLContext context) { SDL_GL_DestroyContext(context); });
-    choosen_minor_version = 6;
-#else
-    // Recursively create GL version until one accepts
-    // Major 4 is mandatory
-    // We use glBufferStorage which needs OpenGL 4.4
-    constexpr std::array accept_gl_minor_versions = {
-        6, // OpenGL 4.6
-        5, // OpenGL 4.5
-        4, // OpenGL 4.4
-    };
-
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-
-    for (int minor_version : accept_gl_minor_versions) {
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, minor_version);
-        gl_state.context = GLContextPtr(SDL_GL_CreateContext(window), [](SDL_GLContext context) { SDL_GL_DestroyContext(context); });
-        if (gl_state.context) {
-            break;
-        }
-    }
-#endif
-
-    if (!gl_state.context)
-        return false;
 
 #ifdef __ANDROID__
     gladLoadGLES2Loader((GLADloadproc)SDL_GL_GetProcAddress);
 #else
-    gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress);
+    static std::function<void *(const char *)> *s_proc_addr = &gl_state.window_callbacks.get_proc_address;
+    gladLoadGLLoader([](const char *name) -> void * {
+        return (*s_proc_addr)(name);
+    });
 #endif
+
     // glad_set_post_callback(after_callback);
     // Detect GPU and features
 
@@ -284,6 +253,28 @@ bool GLState::init() {
 
 void GLState::late_init(const Config &cfg, const std::string_view game_id, MemState &mem) {
     texture_cache.init(true, texture_folder(), game_id);
+}
+
+int GLState::client_width() const {
+#ifdef _WIN32
+    if (window_callbacks.native_handle) {
+        RECT rect;
+        if (GetClientRect(reinterpret_cast<HWND>(window_callbacks.native_handle), &rect))
+            return rect.right - rect.left;
+    }
+#endif
+    return window_callbacks.client_width ? window_callbacks.client_width() : 0;
+}
+
+int GLState::client_height() const {
+#ifdef _WIN32
+    if (window_callbacks.native_handle) {
+        RECT rect;
+        if (GetClientRect(reinterpret_cast<HWND>(window_callbacks.native_handle), &rect))
+            return rect.bottom - rect.top;
+    }
+#endif
+    return window_callbacks.client_height ? window_callbacks.client_height() : 0;
 }
 
 bool create(std::unique_ptr<Context> &context) {
@@ -662,8 +653,7 @@ void get_surface_data(GLState &renderer, GLContext &context, uint32_t *pixels, S
     glPixelStorei(GL_PACK_ROW_LENGTH, 0);
 }
 
-void GLState::render_frame(const SceFVector2 &viewport_pos, const SceFVector2 &viewport_size, DisplayState &display,
-    const GxmState &gxm, MemState &mem) {
+void GLState::render_frame(DisplayState &display, const GxmState &gxm, MemState &mem) {
     should_display = false;
 
     DisplayFrameInfo frame;
@@ -674,6 +664,45 @@ void GLState::render_frame(const SceFVector2 &viewport_pos, const SceFVector2 &v
 
     if (!frame.base)
         return;
+
+    SceFVector2 vp_pos = { 0.0f, 0.0f };
+    SceFVector2 vp_size = { 0.0f, 0.0f };
+
+    GLuint default_fbo = window_callbacks.default_fbo ? window_callbacks.default_fbo() : 0;
+
+    const float fb_w = static_cast<float>(client_width());
+    const float fb_h = static_cast<float>(client_height());
+
+    if (fb_h > 0.0f) {
+        const float window_aspect = fb_w / fb_h;
+        constexpr float vita_aspect = static_cast<float>(DEFAULT_RES_WIDTH) / DEFAULT_RES_HEIGHT;
+        const bool pixel_perfect = fullscreen_hd_res_pixel_perfect && fullscreen
+            && !(static_cast<int>(fb_w) % DEFAULT_RES_WIDTH)
+            && !(static_cast<int>(fb_h) % (DEFAULT_RES_HEIGHT - 4));
+
+        if (stretch_the_display_area && !pixel_perfect) {
+            vp_pos = { 0.0f, 0.0f };
+            vp_size = { fb_w, fb_h };
+        } else if ((window_aspect > vita_aspect) && !pixel_perfect) {
+            vp_size.x = fb_h * vita_aspect;
+            vp_size.y = fb_h;
+            vp_pos.x = (fb_w - vp_size.x) / 2.0f;
+            vp_pos.y = 0.0f;
+        } else {
+            vp_size.x = fb_w;
+            vp_size.y = fb_w / vita_aspect;
+            vp_pos.x = 0.0f;
+            vp_pos.y = (fb_h - vp_size.y) / 2.0f;
+        }
+    }
+
+    // store viewport for touch
+    display.viewport_drawable_w = static_cast<int>(fb_w);
+    display.viewport_drawable_h = static_cast<int>(fb_h);
+    display.viewport_x = vp_pos.x;
+    display.viewport_y = vp_pos.y;
+    display.viewport_w = vp_size.x;
+    display.viewport_h = vp_size.y;
 
     // Check if the surface exists
     float uvs[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -722,11 +751,25 @@ void GLState::render_frame(const SceFVector2 &viewport_pos, const SceFVector2 &v
 
     glBindTexture(GL_TEXTURE_2D, last_texture);
 
-    screen_renderer.render(viewport_pos, viewport_size, need_uv ? uvs : nullptr, static_cast<GLuint>(surface_handle), texture_size);
+    screen_renderer.render(vp_pos, vp_size, need_uv ? uvs : nullptr, static_cast<GLuint>(surface_handle), texture_size, default_fbo);
 }
 
-void GLState::swap_window(SDL_Window *window) {
-    SDL_GL_SwapWindow(window);
+void GLState::swap_window() {
+    if (window_callbacks.swap)
+        window_callbacks.swap();
+}
+
+void GLState::set_current() {
+    if (window_callbacks.set_current) {
+        if (!window_callbacks.set_current()) {
+            LOG_ERROR("set_current failed");
+        }
+    }
+}
+
+void GLState::done_current() {
+    if (window_callbacks.done_current)
+        window_callbacks.done_current();
 }
 
 std::vector<uint32_t> GLState::dump_frame(DisplayState &display, uint32_t &width, uint32_t &height) {

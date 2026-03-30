@@ -250,19 +250,21 @@ void destroy(SceGxmSyncObject *sync, State &state) {
     // nothing to do right now
 }
 
-bool init(SDL_Window *window, std::unique_ptr<State> &state, Backend backend, const Config &config, const Root &root_paths) {
+bool init(const WindowCallbacks &callbacks, std::unique_ptr<State> &state, Backend backend, const Config &config, const Root &root_paths) {
     switch (backend) {
     case Backend::OpenGL:
         state = std::make_unique<gl::GLState>();
+        state->window_callbacks = callbacks;
         state->init_paths(root_paths);
-        if (!gl::create(window, state, config))
+        if (!gl::create(state, config))
             return false;
         break;
 
     case Backend::Vulkan:
         state = std::make_unique<vulkan::VKState>(config.gpu_idx);
+        state->window_callbacks = callbacks;
         state->init_paths(root_paths);
-        if (!vulkan::create(window, state, config))
+        if (!vulkan::create(state, config))
             return false;
         break;
 
