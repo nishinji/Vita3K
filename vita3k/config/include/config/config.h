@@ -62,14 +62,9 @@ enum ScreenshotFormat {
     code(bool, "pstv-mode", false, pstv_mode)                                                           \
     code(bool, "show-mode", false, show_mode)                                                           \
     code(bool, "demo-mode", false, demo_mode)                                                           \
-    code(bool, "show-gui", false, show_gui)                                                             \
-    code(bool, "show-info-bar", false, show_info_bar)                                                   \
     code(bool, "apps-list-grid", false, apps_list_grid)                                                 \
-    code(bool, "display-system-apps", true, display_system_apps)                                        \
     code(bool, "stretch_the_display_area", false, stretch_the_display_area)                             \
     code(bool, "fullscreen_hd_res_pixel_perfect", false, fullscreen_hd_res_pixel_perfect)               \
-    code(bool, "show-live-area-screen", true, show_live_area_screen)                                    \
-    code(int, "icon-size", 64, icon_size)                                                               \
     code(bool, "archive-log", false, archive_log)                                                       \
     code(std::string, "backend-renderer", "Vulkan", backend_renderer)                                   \
     code(std::string, "custom-driver-name", "", custom_driver_name)                                     \
@@ -109,45 +104,40 @@ enum ScreenshotFormat {
     code(bool, "discord-rich-presence", true, discord_rich_presence)                                    \
     code(bool, "wait-for-debugger", false, wait_for_debugger)                                           \
     code(bool, "color-surface-debug", false, color_surface_debug)                                       \
-    code(bool, "show-touchpad-cursor", true, show_touchpad_cursor)                                      \
     code(bool, "performance-overlay", false, performance_overlay)                                       \
     code(int, "performance-overlay-detail", static_cast<int>(MINIMUM), performance_overlay_detail)      \
     code(int, "performance-overlay-position", static_cast<int>(TOP_LEFT), performance_overlay_position) \
-    code(bool, "enable-gamepad-overlay", true, enable_gamepad_overlay)                                  \
-    code(bool, "overlay-show-touch-switch", false, overlay_show_touch_switch)                           \
-    code(float, "overlay-scale", 1.0f, overlay_scale)                                                   \
-    code(int, "overlay-opacity", 100, overlay_opacity)                                                  \
     code(int, "screenshot-format", static_cast<int>(JPEG), screenshot_format)                           \
     code(bool, "disable-motion", false, disable_motion)                                                 \
     code(float, "controller-analog-multiplier", 1.0f, controller_analog_multiplier)                     \
-    code(int, "keyboard-button-select", 229, keyboard_button_select)                                    \
-    code(int, "keyboard-button-start", 40, keyboard_button_start)                                       \
-    code(int, "keyboard-button-up", 82, keyboard_button_up)                                             \
-    code(int, "keyboard-button-right", 79, keyboard_button_right)                                       \
-    code(int, "keyboard-button-down", 81, keyboard_button_down)                                         \
-    code(int, "keyboard-button-left", 80, keyboard_button_left)                                         \
-    code(int, "keyboard-button-l1", 20, keyboard_button_l1)                                             \
-    code(int, "keyboard-button-r1", 8, keyboard_button_r1)                                              \
-    code(int, "keyboard-button-l2", 24, keyboard_button_l2)                                             \
-    code(int, "keyboard-button-r2", 18, keyboard_button_r2)                                             \
-    code(int, "keyboard-button-l3", 9, keyboard_button_l3)                                              \
-    code(int, "keyboard-button-r3", 11, keyboard_button_r3)                                             \
-    code(int, "keyboard-button-triangle", 25, keyboard_button_triangle)                                 \
-    code(int, "keyboard-button-circle", 6, keyboard_button_circle)                                      \
-    code(int, "keyboard-button-cross", 27, keyboard_button_cross)                                       \
-    code(int, "keyboard-button-square", 29, keyboard_button_square)                                     \
-    code(int, "keyboard-leftstick-left", 4, keyboard_leftstick_left)                                    \
-    code(int, "keyboard-leftstick-right", 7, keyboard_leftstick_right)                                  \
-    code(int, "keyboard-leftstick-up", 26, keyboard_leftstick_up)                                       \
-    code(int, "keyboard-leftstick-down", 22, keyboard_leftstick_down)                                   \
-    code(int, "keyboard-rightstick-left", 13, keyboard_rightstick_left)                                 \
-    code(int, "keyboard-rightstick-right", 15, keyboard_rightstick_right)                               \
-    code(int, "keyboard-rightstick-up", 12, keyboard_rightstick_up)                                     \
-    code(int, "keyboard-rightstick-down", 14, keyboard_rightstick_down)                                 \
-    code(int, "keyboard-button-psbutton", 19, keyboard_button_psbutton)                                 \
-    code(int, "keyboard-gui-toggle-gui", 10, keyboard_gui_toggle_gui)                                   \
-    code(int, "keyboard-gui-fullscreen", 68, keyboard_gui_fullscreen)                                   \
-    code(int, "keyboard-gui-toggle-touch", 23, keyboard_gui_toggle_touch)                               \
+    code(int, "keyboard-button-select", 16777251, keyboard_button_select)                               \
+    code(int, "keyboard-button-start", 16777220, keyboard_button_start)                                 \
+    code(int, "keyboard-button-up", 16777235, keyboard_button_up)                                       \
+    code(int, "keyboard-button-right", 16777236, keyboard_button_right)                                 \
+    code(int, "keyboard-button-down", 16777237, keyboard_button_down)                                   \
+    code(int, "keyboard-button-left", 16777234, keyboard_button_left)                                   \
+    code(int, "keyboard-button-l1", 81, keyboard_button_l1)                                             \
+    code(int, "keyboard-button-r1", 69, keyboard_button_r1)                                             \
+    code(int, "keyboard-button-l2", 85, keyboard_button_l2)                                             \
+    code(int, "keyboard-button-r2", 79, keyboard_button_r2)                                             \
+    code(int, "keyboard-button-l3", 70, keyboard_button_l3)                                             \
+    code(int, "keyboard-button-r3", 72, keyboard_button_r3)                                             \
+    code(int, "keyboard-button-triangle", 86, keyboard_button_triangle)                                 \
+    code(int, "keyboard-button-circle", 67, keyboard_button_circle)                                     \
+    code(int, "keyboard-button-cross", 88, keyboard_button_cross)                                       \
+    code(int, "keyboard-button-square", 90, keyboard_button_square)                                     \
+    code(int, "keyboard-leftstick-left", 65, keyboard_leftstick_left)                                   \
+    code(int, "keyboard-leftstick-right", 68, keyboard_leftstick_right)                                 \
+    code(int, "keyboard-leftstick-up", 87, keyboard_leftstick_up)                                       \
+    code(int, "keyboard-leftstick-down", 83, keyboard_leftstick_down)                                   \
+    code(int, "keyboard-rightstick-left", 74, keyboard_rightstick_left)                                 \
+    code(int, "keyboard-rightstick-right", 76, keyboard_rightstick_right)                               \
+    code(int, "keyboard-rightstick-up", 73, keyboard_rightstick_up)                                     \
+    code(int, "keyboard-rightstick-down", 75, keyboard_rightstick_down)                                 \
+    code(int, "keyboard-button-psbutton", 80, keyboard_button_psbutton)                                 \
+    code(int, "keyboard-gui-toggle-gui", 71, keyboard_gui_toggle_gui)                                   \
+    code(int, "keyboard-gui-fullscreen", 16777274, keyboard_gui_fullscreen)                             \
+    code(int, "keyboard-gui-toggle-touch", 84, keyboard_gui_toggle_touch)                               \
     code(int, "keyboard-toggle-texture-replacement", 0, keyboard_toggle_texture_replacement)            \
     code(int, "keyboard-take-screenshot", 0, keyboard_take_screenshot)                                  \
     code(int, "keyboard-pinch-modifier", 0, keyboard_pinch_modifier)                                    \
@@ -156,11 +146,9 @@ enum ScreenshotFormat {
     code(std::string, "user-id", std::string{}, user_id)                                                \
     code(bool, "user-auto-connect", false, auto_user_login)                                             \
     code(std::string, "user-lang", std::string{}, user_lang)                                            \
-    code(bool, "display-info-message", false, display_info_message)                                     \
     code(bool, "show-welcome", true, show_welcome)                                                      \
     code(bool, "check-for-updates", true, check_for_updates)                                            \
     code(int, "file-loading-delay", 0, file_loading_delay)                                              \
-    code(bool, "asia-font-support", false, asia_font_support)                                           \
     code(bool, "shader-cache", true, shader_cache)                                                      \
     code(bool, "spirv-shader", false, spirv_shader)                                                     \
     code(bool, "fps-hack", false, fps_hack)                                                             \
@@ -188,6 +176,7 @@ enum ScreenshotFormat {
 // When adding in a new macro for generation, ALL options must be stated.
 #define CONFIG_VECTOR(code)                                                                             \
     code(std::vector<short>, "controller-binds", std::vector<short>{}, controller_binds)                \
+    code(std::vector<short>, "controller-axis-binds", std::vector<short>{}, controller_axis_binds)      \
     code(std::vector<int>, "controller-led-color", std::vector<int>{}, controller_led_color)            \
     code(std::vector<std::string>, "lle-modules", std::vector<std::string>{}, lle_modules)              \
     code(std::vector<uint64_t>, "ime-langs", std::vector<uint64_t>{4}, ime_langs)                       \
