@@ -73,6 +73,19 @@ include_directories(${CMAKE_BINARY_DIR}/vita3k/config)
 
 if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
 	set(LINUX TRUE)
+
+	find_package(X11)
+	if(X11_FOUND)
+		add_compile_definitions(HAVE_X11)
+	endif()
+
+	find_package(PkgConfig)
+	if(PkgConfig_FOUND)
+		pkg_check_modules(WAYLAND wayland-client)
+		if(WAYLAND_FOUND)
+			add_compile_definitions(HAVE_WAYLAND)
+		endif()
+	endif()
 endif()
 
 get_boost()
@@ -90,6 +103,10 @@ if(NOT MSVC)
 	add_compile_options(-Wformat -Werror=format-security)
 endif()
 
+if(NOT ANDROID)
+	include(${CMAKE_SOURCE_DIR}/cmake/qt6.cmake)
+endif()
+
 add_subdirectory(app)
 add_subdirectory(audio)
 add_subdirectory(camera)
@@ -102,7 +119,9 @@ add_subdirectory(dialog)
 add_subdirectory(display)
 add_subdirectory(features)
 add_subdirectory(glutil)
-add_subdirectory(gui)
+if(NOT ANDROID)
+	add_subdirectory(gui-qt)
+endif()
 add_subdirectory(gxm)
 add_subdirectory(host)
 add_subdirectory(ime)
@@ -172,7 +191,10 @@ if(WIN32)
 	target_sources(vita3k PRIVATE util/src/vc_runtime_checker.cpp)
 endif()
 
-target_link_libraries(vita3k PRIVATE app audio config cppcommon ctrl display gdbstub gui gxm io miniz modules motion packages patch renderer shader touch util)
+target_link_libraries(vita3k PRIVATE app audio config cppcommon ctrl dialog display gdbstub gxm io miniz modules motion packages patch renderer shader touch util)
+if(NOT ANDROID)
+	target_link_libraries(vita3k PRIVATE gui-qt)
+endif()
 if(USE_DISCORD_RICH_PRESENCE)
 	target_link_libraries(vita3k PRIVATE discord-rpc)
 endif()
@@ -241,6 +263,12 @@ if(APPLE)
 	message(STATUS "MoltenVK dylib path: ${MOLTENVK_DYLIB}")
 	target_sources(vita3k PRIVATE ${MOLTENVK_DYLIB})
 	set_source_files_properties(${MOLTENVK_DYLIB} PROPERTIES MACOSX_PACKAGE_LOCATION Frameworks)
+
+	qt_finalize_target(vita3k)
+	if(MACDEPLOYQT_EXECUTABLE)
+		add_custom_command(TARGET vita3k POST_BUILD
+			COMMAND "${MACDEPLOYQT_EXECUTABLE}" "$<TARGET_FILE_DIR:vita3k>/../.." "$<$<CONFIG:Debug,RelWithDebInfo>:-no-strip>")
+	endif()
 elseif(LINUX)
 	set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-rpath='$ORIGIN'")
 	if(BUILD_APPIMAGE)
@@ -294,7 +322,7 @@ elseif(WIN32)
 	target_link_libraries(vita3k PRIVATE Version)
 	target_sources(vita3k PRIVATE resource.h Vita3K.ico Vita3K.rc Windows.manifest)
 	set_property(DIRECTORY ${CMAKE_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT vita3k)
-	set_target_properties(vita3k PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/bin/$(Configuration)")
+	set_target_properties(vita3k PROPERTIES WIN32_EXECUTABLE TRUE VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/bin/$(Configuration)")
 	add_custom_command(
 		TARGET vita3k
 		POST_BUILD
@@ -319,6 +347,14 @@ elseif(WIN32)
 		POST_BUILD
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${OPENSSL_ROOT_DIR}/bin/libssl-3-x64.dll" "$<TARGET_FILE_DIR:vita3k>"
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${OPENSSL_ROOT_DIR}/bin/libcrypto-3-x64.dll" "$<TARGET_FILE_DIR:vita3k>")
+	endif()
+	if(WINDEPLOYQT_EXECUTABLE)
+		add_custom_command(TARGET vita3k POST_BUILD
+			COMMAND "${WINDEPLOYQT_EXECUTABLE}" --no-compiler-runtime --no-opengl-sw --no-patchqt
+				--no-system-d3d-compiler --no-system-dxc-compiler --no-quick-import
+				--plugindir "$<IF:$<CXX_COMPILER_ID:MSVC>,$<TARGET_FILE_DIR:vita3k>/plugins,$<TARGET_FILE_DIR:vita3k>/share/qt6/plugins>"
+				--translationdir "$<IF:$<CXX_COMPILER_ID:MSVC>,$<TARGET_FILE_DIR:vita3k>/translations,$<TARGET_FILE_DIR:vita3k>/share/qt6/translations>"
+				--verbose 0 "$<TARGET_FILE:vita3k>")
 	endif()
 elseif(ANDROID)
 	add_custom_command(

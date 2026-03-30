@@ -1526,7 +1526,8 @@ std::vector<std::string> renderer::enumerate_vulkan_gpu_names() {
     gpu_list.emplace_back("Automatic");
 
     try {
-        VULKAN_HPP_DEFAULT_DISPATCHER.init();
+        vk::detail::DispatchLoaderDynamic dispatch;
+        dispatch.init();
 
         vk::ApplicationInfo app_info{
             .apiVersion = VK_API_VERSION_1_0
@@ -1534,7 +1535,7 @@ std::vector<std::string> renderer::enumerate_vulkan_gpu_names() {
 
         std::vector<const char *> extensions;
 #ifdef __APPLE__
-        for (const vk::ExtensionProperties &prop : vk::enumerateInstanceExtensionProperties()) {
+        for (const vk::ExtensionProperties &prop : vk::enumerateInstanceExtensionProperties(nullptr, dispatch)) {
             if (std::string_view(prop.extensionName.data()) == vk::KHRPortabilityEnumerationExtensionName) {
                 extensions.push_back(vk::KHRPortabilityEnumerationExtensionName);
                 break;
@@ -1550,22 +1551,121 @@ std::vector<std::string> renderer::enumerate_vulkan_gpu_names() {
         };
         instance_info.setPEnabledExtensionNames(extensions);
 
-        vk::UniqueInstance instance = vk::createInstanceUnique(instance_info);
+        vk::UniqueInstance instance = vk::createInstanceUnique(instance_info, nullptr, dispatch);
+        dispatch.init(instance.get(), dispatch.vkGetInstanceProcAddr);
 
-        VULKAN_HPP_DEFAULT_DISPATCHER.vkEnumeratePhysicalDevices = reinterpret_cast<PFN_vkEnumeratePhysicalDevices>(
-            VULKAN_HPP_DEFAULT_DISPATCHER.vkGetInstanceProcAddr(instance.get(), "vkEnumeratePhysicalDevices"));
-        VULKAN_HPP_DEFAULT_DISPATCHER.vkGetPhysicalDeviceProperties = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties>(
-            VULKAN_HPP_DEFAULT_DISPATCHER.vkGetInstanceProcAddr(instance.get(), "vkGetPhysicalDeviceProperties"));
-        VULKAN_HPP_DEFAULT_DISPATCHER.vkDestroyInstance = reinterpret_cast<PFN_vkDestroyInstance>(
-            VULKAN_HPP_DEFAULT_DISPATCHER.vkGetInstanceProcAddr(instance.get(), "vkDestroyInstance"));
-
-        for (const vk::PhysicalDevice &gpu : instance->enumeratePhysicalDevices())
-            gpu_list.emplace_back(gpu.getProperties().deviceName.data());
+        for (const vk::PhysicalDevice &gpu : instance->enumeratePhysicalDevices(dispatch))
+            gpu_list.emplace_back(gpu.getProperties(dispatch).deviceName.data());
     } catch (const std::exception &e) {
         LOG_WARN("Vulkan GPU enumeration failed: {}", e.what());
     }
 
     return gpu_list;
+}
+
+int renderer::enumerate_vulkan_mapping_methods(int gpu_idx) {
+    int mask = (1 << static_cast<int>(MappingMethod::Disabled));
+
+#ifdef __APPLE__
+    return mask;
+#endif
+
+    try {
+        vk::detail::DispatchLoaderDynamic dispatch;
+        dispatch.init();
+
+        vk::ApplicationInfo app_info{
+            .apiVersion = VK_API_VERSION_1_0
+        };
+
+        std::vector<const char *> instance_extensions;
+        bool has_properties2 = false;
+        for (const vk::ExtensionProperties &prop : vk::enumerateInstanceExtensionProperties(nullptr, dispatch)) {
+            if (std::string_view(prop.extensionName.data()) == vk::KHRGetPhysicalDeviceProperties2ExtensionName) {
+                instance_extensions.push_back(vk::KHRGetPhysicalDeviceProperties2ExtensionName);
+                has_properties2 = true;
+                break;
+            }
+        }
+        if (!has_properties2)
+            return mask;
+
+        vk::InstanceCreateInfo instance_info{
+            .pApplicationInfo = &app_info,
+        };
+        instance_info.setPEnabledExtensionNames(instance_extensions);
+
+        vk::UniqueInstance instance = vk::createInstanceUnique(instance_info, nullptr, dispatch);
+        dispatch.init(instance.get(), dispatch.vkGetInstanceProcAddr);
+
+        std::vector<vk::PhysicalDevice> physical_devices = instance->enumeratePhysicalDevices(dispatch);
+        if (physical_devices.empty())
+            return mask;
+
+        vk::PhysicalDevice physical_device;
+        if (gpu_idx > 0 && gpu_idx <= static_cast<int>(physical_devices.size()))
+            physical_device = physical_devices[gpu_idx - 1];
+        else
+            physical_device = physical_devices[0];
+
+        bool support_buffer_device_address = false;
+        bool support_standard_layout = false;
+        bool support_external_memory = false;
+#ifdef __ANDROID__
+        bool support_android_buffer_import = false;
+        bool support_unix_fd_import = false;
+#endif
+        for (const vk::ExtensionProperties &ext : physical_device.enumerateDeviceExtensionProperties(nullptr, dispatch)) {
+            const std::string_view name(ext.extensionName.data());
+            if (name == vk::KHRBufferDeviceAddressExtensionName)
+                support_buffer_device_address = true;
+            else if (name == vk::KHRUniformBufferStandardLayoutExtensionName)
+                support_standard_layout = true;
+            else if (name == vk::EXTExternalMemoryHostExtensionName)
+                support_external_memory = true;
+#ifdef __ANDROID__
+            else if (name == VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME)
+                support_android_buffer_import = true;
+            else if (name == VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME)
+                support_unix_fd_import = true;
+#endif
+        }
+
+        bool support_memory_mapping = true;
+        if (support_buffer_device_address) {
+            auto features = physical_device.getFeatures2KHR<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceBufferDeviceAddressFeatures>(dispatch);
+            support_buffer_device_address = static_cast<bool>(features.get<vk::PhysicalDeviceBufferDeviceAddressFeatures>().bufferDeviceAddress);
+        }
+        support_memory_mapping &= support_buffer_device_address;
+
+        if (support_standard_layout) {
+            auto features = physical_device.getFeatures2KHR<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceUniformBufferStandardLayoutFeatures>(dispatch);
+            support_standard_layout = static_cast<bool>(features.get<vk::PhysicalDeviceUniformBufferStandardLayoutFeatures>().uniformBufferStandardLayout);
+        }
+        support_memory_mapping &= support_standard_layout;
+
+        if (support_memory_mapping) {
+            mask |= (1 << static_cast<int>(MappingMethod::DoubleBuffer));
+            mask |= (1 << static_cast<int>(MappingMethod::PageTable));
+
+            if (support_external_memory) {
+                auto props = physical_device.getProperties2KHR<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceExternalMemoryHostPropertiesEXT>(dispatch);
+                support_external_memory = (props.get<vk::PhysicalDeviceExternalMemoryHostPropertiesEXT>().minImportedHostPointerAlignment <= 4096);
+            }
+
+            if (support_external_memory)
+                mask |= (1 << static_cast<int>(MappingMethod::ExernalHost));
+
+#ifdef __ANDROID__
+            if (support_android_buffer_import || support_unix_fd_import)
+                mask |= (1 << static_cast<int>(MappingMethod::NativeBuffer));
+#endif
+        }
+    } catch (const std::exception &e) {
+        LOG_WARN("Vulkan mapping method enumeration failed: {}", e.what());
+    }
+
+    return mask;
 }
 
 namespace renderer::vulkan {

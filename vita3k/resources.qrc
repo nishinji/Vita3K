@@ -1,0 +1,20 @@
+<RCC>
+    <qresource prefix="/">
+        <file>icons/PSV_Layout.svg</file>
+        <file>Vita3K.ico</file>
+        <file>Vita3K.png</file>
+        <file>icons/bronze.png</file>
+        <file>icons/silver.png</file>
+        <file>icons/gold.png</file>
+        <file>icons/platinum.png</file>
+        <file>icons/configure.png</file>
+        <file>icons/controllers.png</file>
+        <file>icons/exit_fullscreen.png</file>
+        <file>icons/fullscreen.png</file>
+        <file>icons/open.png</file>
+        <file>icons/pause.png</file>
+        <file>icons/play.png</file>
+        <file>icons/refresh.png</file>
+        <file>icons/stop.png</file>
+    </qresource>
+</RCC>

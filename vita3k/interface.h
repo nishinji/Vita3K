@@ -20,41 +20,9 @@
 #include <util/exit_code.h>
 #include <util/fs.h>
 
-#include <miniz.h>
-
-#include <memory>
-#include <optional>
-#include <vector>
-
-struct GuiState;
 struct EmuEnvState;
-
-typedef std::shared_ptr<mz_zip_archive> ZipPtr;
-
-inline void delete_zip(mz_zip_archive *zip) {
-    mz_zip_reader_end(zip);
-    delete zip;
-}
-
-struct ArchiveContents {
-    std::optional<float> count;
-    std::optional<float> current;
-    std::optional<float> progress;
-};
-
-struct ContentInfo {
-    std::string title;
-    std::string title_id;
-    std::string category;
-    std::string content_id;
-    std::string path;
-    bool state = false;
-};
-
-bool handle_events(EmuEnvState &emuenv, GuiState &gui);
-
-std::vector<ContentInfo> install_archive(EmuEnvState &emuenv, GuiState *gui, const fs::path &archive_path, const std::function<void(ArchiveContents)> &progress_callback = nullptr);
-uint32_t install_contents(EmuEnvState &emuenv, GuiState *gui, const fs::path &path);
 
 ExitCode load_app(int32_t &main_module_id, EmuEnvState &emuenv);
 ExitCode run_app(EmuEnvState &emuenv, int32_t main_module_id);
+void toggle_texture_replacement(EmuEnvState &emuenv);
+void take_screenshot(EmuEnvState &emuenv);

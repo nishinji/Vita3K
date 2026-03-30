@@ -152,6 +152,7 @@ int send_single_command(State &state, Context *ctx, const CommandOpcode opcode, 
 }
 
 std::vector<std::string> enumerate_vulkan_gpu_names();
+int enumerate_vulkan_mapping_methods(int gpu_idx);
 
 namespace texture {
 
