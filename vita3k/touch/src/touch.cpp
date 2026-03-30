@@ -15,6 +15,7 @@
 // with this program; if not, write to the Free Software Foundation, Inc.,
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
+#include <dialog/state.h>
 #include <display/functions.h>
 #include <display/state.h>
 #include <emuenv/state.h>
@@ -24,6 +25,10 @@
 #include <touch/touch.h>
 
 #include <SDL3/SDL_events.h>
+
+#ifdef _WIN32
+#include <Windows.h>
+#endif
 
 #include <cstring>
 
@@ -72,8 +77,8 @@ static SceTouchData recover_touch_events(const EmuEnvState &emuenv) {
         touch_data.report[i].id = static_cast<uint8_t>(finger_buffer[i].touchID);
         touch_data.report[i].force = forceTouchEnabled[touchscreen_port] ? 128 : 0;
 
-        float x = (finger_buffer[i].x * emuenv.drawable_size.x - emuenv.drawable_viewport_pos.x) / emuenv.drawable_viewport_size.x;
-        float y = (finger_buffer[i].y * emuenv.drawable_size.y - emuenv.drawable_viewport_pos.y) / emuenv.drawable_viewport_size.y;
+        float x = (finger_buffer[i].x * emuenv.display.viewport_drawable_w - emuenv.display.viewport_x) / emuenv.display.viewport_w;
+        float y = (finger_buffer[i].y * emuenv.display.viewport_drawable_h - emuenv.display.viewport_y) / emuenv.display.viewport_h;
         touch_data.report[i].x = static_cast<uint16_t>(x * 1920);
 
         if (touchscreen_port == SCE_TOUCH_PORT_FRONT) {
@@ -132,8 +137,28 @@ void touch_vsync_update(const EmuEnvState &emuenv) {
         buffers[touchscreen_port] = touch_data;
 
     } else {
-        SceFVector2 touch_pos_window = { 0, 0 };
-        uint32_t buttons = SDL_GetMouseState(&touch_pos_window.x, &touch_pos_window.y);
+        const auto &ts = emuenv.touch;
+
+        float mouse_x, mouse_y;
+        bool left, right;
+#ifdef _WIN32
+        {
+            POINT pt;
+            GetCursorPos(&pt);
+            if (ts.native_handle)
+                ScreenToClient(reinterpret_cast<HWND>(ts.native_handle), &pt);
+            mouse_x = static_cast<float>(pt.x);
+            mouse_y = static_cast<float>(pt.y);
+            left = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+            right = (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
+        }
+#else
+        mouse_x = ts.mouse_x;
+        mouse_y = ts.mouse_y;
+        left = ts.mouse_button_left;
+        right = ts.mouse_button_right;
+#endif
+        left = left || pinchModifierEnabled;
 
         for (int port = 0; port < 2; port++) {
             // do it for both the front and the back touchscreen
@@ -141,11 +166,8 @@ void touch_vsync_update(const EmuEnvState &emuenv) {
             memset(data, 0, sizeof(SceTouchData));
             data->timeStamp = timestamp;
 
-            if (pinchModifierEnabled) {
-                buttons |= SDL_BUTTON_LMASK;
-            }
-            const uint32_t mask = (port == SCE_TOUCH_PORT_BACK) ? SDL_BUTTON_RMASK : SDL_BUTTON_LMASK;
-            if ((buttons & mask) && emuenv.renderer_focused) {
+            const bool pressed = (port == SCE_TOUCH_PORT_BACK) ? right : left;
+            if (pressed && ts.renderer_focused) {
                 if (!is_touched[port]) {
                     curr_touch_id[port]++;
                     // the touch id must be between 0 and 127
@@ -153,24 +175,9 @@ void touch_vsync_update(const EmuEnvState &emuenv) {
                     is_touched[port] = true;
                 }
 
-                SceIVector2 SDL_window_size = { 0, 0 };
-                SDL_Window *const window = SDL_GetMouseFocus();
-                SDL_GetWindowSize(window, &SDL_window_size.x, &SDL_window_size.y);
-
-                SceFVector2 scale = { 1, 1 };
-                if ((SDL_window_size.x > 0) && (SDL_window_size.y > 0)) {
-                    scale.x = static_cast<float>(emuenv.drawable_size.x) / SDL_window_size.x;
-                    scale.y = static_cast<float>(emuenv.drawable_size.y) / SDL_window_size.y;
-                }
-
-                const SceFVector2 touch_pos_drawable = {
-                    touch_pos_window.x * scale.x,
-                    touch_pos_window.y * scale.y
-                };
-
                 const SceFVector2 touch_pos_viewport = {
-                    (touch_pos_drawable.x - emuenv.drawable_viewport_pos.x) / emuenv.drawable_viewport_size.x,
-                    (touch_pos_drawable.y - emuenv.drawable_viewport_pos.y) / emuenv.drawable_viewport_size.y
+                    (mouse_x - emuenv.display.viewport_x) / emuenv.display.viewport_w,
+                    (mouse_y - emuenv.display.viewport_y) / emuenv.display.viewport_h
                 };
 
                 if ((touch_pos_viewport.x >= 0) && (touch_pos_viewport.y >= 0) && (touch_pos_viewport.x < 1) && (touch_pos_viewport.y < 1)) {
@@ -339,6 +346,10 @@ int toggle_touchscreen() {
 
 int touch_get(const SceUID thread_id, EmuEnvState &emuenv, const SceUInt32 &port, SceTouchData *pData, SceUInt32 count, bool is_peek) {
     memset(pData, 0, sizeof(SceTouchData) * count);
+    // issue if common dialog is LLEd?
+    if (emuenv.drop_inputs || emuenv.common_dialog.status == SCE_COMMON_DIALOG_STATUS_RUNNING)
+        return 0;
+
     const int port_idx = static_cast<int>(port);
 
     int nb_returned_data = 1;
