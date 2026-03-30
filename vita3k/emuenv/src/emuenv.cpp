@@ -17,8 +17,10 @@
 
 #include <emuenv/state.h>
 
+#include <app/state.h>
 #include <audio/state.h>
 #include <camera/state.h>
+#include <compat/state.h>
 #include <config/state.h>
 #include <ctrl/state.h>
 #include <dialog/state.h>
@@ -61,6 +63,8 @@ EmuEnvState::EmuEnvState()
     , kernel(*_kernel)
     , _audio(new AudioState)
     , audio(*_audio)
+    , _app(new AppState)
+    , app(*_app)
     , _gxm(new GxmState)
     , gxm(*_gxm)
     , _io(new IOState)
@@ -92,7 +96,9 @@ EmuEnvState::EmuEnvState()
     , _http(new HTTPState)
     , http(*_http)
     , _camera(new CameraState)
-    , camera(*_camera) {
+    , camera(*_camera)
+    , _compat(new CompatState)
+    , compat(*_compat) {
 }
 DISABLE_WARNING_END;
 

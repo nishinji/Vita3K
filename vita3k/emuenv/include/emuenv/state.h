@@ -40,10 +40,12 @@ struct State;
 
 struct Config;
 struct CPUProtocolBase;
+struct CompatState;
 struct MemState;
 struct CtrlState;
 struct TouchState;
 struct KernelState;
+struct AppState;
 struct AudioState;
 struct GxmState;
 struct IOState;
@@ -60,12 +62,6 @@ struct SfoFile;
 struct GDBState;
 struct HTTPState;
 struct CameraState;
-
-typedef int32_t SceInt;
-struct IVector2 {
-    SceInt x;
-    SceInt y;
-};
 
 typedef float SceFloat;
 struct FVector2 {
@@ -89,6 +85,7 @@ private:
     std::unique_ptr<CtrlState> _ctrl;
     std::unique_ptr<TouchState> _touch;
     std::unique_ptr<KernelState> _kernel;
+    std::unique_ptr<AppState> _app;
     std::unique_ptr<AudioState> _audio;
     std::unique_ptr<GxmState> _gxm;
     std::unique_ptr<IOState> _io;
@@ -106,6 +103,7 @@ private:
     std::unique_ptr<GDBState> _gdb;
     std::unique_ptr<HTTPState> _http;
     std::unique_ptr<CameraState> _camera;
+    std::unique_ptr<CompatState> _compat;
 
 public:
     // App info contained in its `param.sfo` file
@@ -133,7 +131,6 @@ public:
     std::unique_ptr<CPUProtocolBase> cpu_protocol{};
     SceUID main_thread_id{};
     size_t frame_count = 0;
-    uint32_t sdl_ticks = 0;
     uint32_t fps = 0;
     uint32_t avg_fps = 0;
     uint32_t min_fps = 0;
@@ -141,23 +138,16 @@ public:
     float fps_values[20] = {};
     uint32_t current_fps_offset = 0;
     uint32_t ms_per_frame = 0;
-    WindowPtr window = WindowPtr(nullptr, nullptr);
     renderer::Backend backend_renderer{};
     RendererPtr renderer{};
-    IVector2 drawable_size = { 0, 0 };
-    IVector2 window_size = { 0, 0 }; // Logical size of the window
-    FVector2 logical_viewport_pos = { 0, 0 }; // Position of the logical viewport in the window. For ImGui
-    FVector2 logical_viewport_size = { 0, 0 }; // Size of the logical viewport in the window. For ImGui
-    FVector2 drawable_viewport_pos = { 0, 0 }; // Position of the drawable viewport in the window. For OpenGL/Vulkan
-    FVector2 drawable_viewport_size = { 0, 0 }; // Size of the drawable viewport in the window. For OpenGL/Vulkan
     bool drop_inputs{};
     MemState &mem;
     CtrlState &ctrl;
     TouchState &touch;
     KernelState &kernel;
+    AppState &app;
     AudioState &audio;
     GxmState &gxm;
-    bool renderer_focused{};
     IOState &io;
     MotionState &motion;
     NetState &net;
@@ -177,8 +167,22 @@ public:
     GDBState &gdb;
     HTTPState &http;
     CameraState &camera;
+    CompatState &compat;
     int max_font_level = 0;
     int current_font_level = 0;
+
+    Root get_root_paths() const {
+        Root r;
+        r.set_base_path(base_path);
+        r.set_pref_path(pref_path);
+        r.set_patch_path(patch_path);
+        r.set_log_path(log_path);
+        r.set_config_path(config_path);
+        r.set_shared_path(shared_path);
+        r.set_cache_path(cache_path);
+        r.set_static_assets_path(static_assets_path);
+        return r;
+    }
 
     EmuEnvState();
     // declaring a destructor is necessary to forward declare unique_ptrs
