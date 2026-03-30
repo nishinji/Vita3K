@@ -19,20 +19,17 @@
 
 #include <audio/state.h>
 #include <config/functions.h>
+#include <config/settings.h>
 #include <config/state.h>
 #include <config/version.h>
 #include <display/state.h>
 #include <emuenv/state.h>
-#include <gui/functions.h>
-#include <gui/imgui_impl_sdl.h>
-#include <gui/state.h>
 #include <io/functions.h>
 #include <kernel/state.h>
 #include <motion/state.h>
 #include <ngs/state.h>
 #include <renderer/state.h>
 
-#include <renderer/functions.h>
 #include <util/fs.h>
 #include <util/log.h>
 #include <util/string_utils.h>
@@ -44,8 +41,6 @@
 #include <gdbstub/functions.h>
 
 #include <SDL3/SDL_filesystem.h>
-#include <SDL3/SDL_log.h>
-#include <SDL3/SDL_video.h>
 
 #ifdef _WIN32
 #include <dwmapi.h>
@@ -57,88 +52,20 @@
 #endif
 
 namespace app {
-void update_viewport(EmuEnvState &state) {
-    int w = 0;
-    int h = 0;
+static void set_backend_renderer(EmuEnvState &emuenv, const std::string &backend_renderer) {
+#ifndef __APPLE__
+    emuenv.backend_renderer = (string_utils::toupper(backend_renderer) == "OPENGL")
+        ? renderer::Backend::OpenGL
+        : renderer::Backend::Vulkan;
+#else
+    emuenv.backend_renderer = renderer::Backend::Vulkan;
+#endif
+}
 
-    SDL_GetWindowSize(state.window.get(), &w, &h);
-    state.window_size.x = w;
-    state.window_size.y = h;
-
-    SDL_GetWindowSizeInPixels(state.window.get(), &w, &h);
-    state.drawable_size.x = w;
-    state.drawable_size.y = h;
-
-    state.system_dpi_scale = SDL_GetWindowPixelDensity(state.window.get());
-    state.manual_dpi_scale = SDL_GetDisplayContentScale(SDL_GetDisplayForWindow(state.window.get()));
-    ImGui::GetIO().FontGlobalScale = 1.f * state.manual_dpi_scale;
-
-    if (h > 0) {
-        const float window_aspect = static_cast<float>(w) / h;
-        const float vita_aspect = static_cast<float>(DEFAULT_RES_WIDTH) / DEFAULT_RES_HEIGHT;
-        const bool fullscreen_hd_res_pixel_perfect_en = state.cfg.fullscreen_hd_res_pixel_perfect && state.display.fullscreen && !(w % DEFAULT_RES_WIDTH) && !(h % (DEFAULT_RES_HEIGHT - 4));
-        if (state.cfg.stretch_the_display_area && !fullscreen_hd_res_pixel_perfect_en) {
-            // Match the aspect ratio to the screen size.
-            state.logical_viewport_size.x = static_cast<SceFloat>(state.window_size.x);
-            state.logical_viewport_size.y = static_cast<SceFloat>(state.window_size.y);
-            state.logical_viewport_pos.x = 0;
-            state.logical_viewport_pos.y = 0;
-
-            state.drawable_viewport_size.x = static_cast<SceFloat>(state.drawable_size.x);
-            state.drawable_viewport_size.y = static_cast<SceFloat>(state.drawable_size.y);
-            state.drawable_viewport_pos.x = 0;
-            state.drawable_viewport_pos.y = 0;
-        } else if ((window_aspect > vita_aspect) && !fullscreen_hd_res_pixel_perfect_en) {
-            // Window is wide. Pin top and bottom.
-            state.logical_viewport_size.x = state.window_size.y * vita_aspect;
-            state.logical_viewport_size.y = static_cast<SceFloat>(state.window_size.y);
-            state.logical_viewport_pos.x = (state.window_size.x - state.logical_viewport_size.x) / 2;
-            state.logical_viewport_pos.y = 0;
-
-            state.drawable_viewport_size.x = state.drawable_size.y * vita_aspect;
-            state.drawable_viewport_size.y = static_cast<SceFloat>(state.drawable_size.y);
-            state.drawable_viewport_pos.x = (state.drawable_size.x - state.drawable_viewport_size.x) / 2;
-            state.drawable_viewport_pos.y = 0;
-        } else {
-            // Window is tall. Pin left and right.
-            state.logical_viewport_size.x = static_cast<SceFloat>(state.window_size.x);
-            state.logical_viewport_size.y = state.window_size.x / vita_aspect;
-            state.logical_viewport_pos.x = 0;
-            state.logical_viewport_pos.y = (state.window_size.y - state.logical_viewport_size.y) / 2;
-
-            state.drawable_viewport_size.x = static_cast<SceFloat>(state.drawable_size.x);
-            state.drawable_viewport_size.y = state.drawable_size.x / vita_aspect;
-            state.drawable_viewport_pos.x = 0;
-            state.drawable_viewport_pos.y = (state.drawable_size.y - state.drawable_viewport_size.y) / 2;
-        }
-
-        state.gui_scale.x = state.logical_viewport_size.x / static_cast<float>(DEFAULT_RES_WIDTH) / state.manual_dpi_scale;
-        state.gui_scale.y = state.logical_viewport_size.y / static_cast<float>(DEFAULT_RES_HEIGHT) / state.manual_dpi_scale;
-    } else {
-        state.logical_viewport_pos.x = 0;
-        state.logical_viewport_pos.y = 0;
-        state.logical_viewport_size.x = 0;
-        state.logical_viewport_size.y = 0;
-
-        state.drawable_viewport_pos.x = 0;
-        state.drawable_viewport_pos.y = 0;
-        state.drawable_viewport_size.x = 0;
-        state.drawable_viewport_size.y = 0;
-    }
-
-    // Update nearest font level
-    float scale = state.gui_scale.y * state.system_dpi_scale * state.manual_dpi_scale;
-    state.current_font_level = 0;
-    for (int i = 0; i <= state.max_font_level; i++) {
-        if (i == state.max_font_level || scale <= FontScaleCandidates[i]) {
-            state.current_font_level = i;
-            break;
-        }
-        if (FontScaleCandidates[i] / scale > scale / FontScaleCandidates[i + 1]) {
-            state.current_font_level = i;
-            break;
-        }
-    }
+void set_current_config(EmuEnvState &emuenv, const std::string &app_path) {
+    config::set_current_config(emuenv.cfg, emuenv.config_path, app_path);
+    set_backend_renderer(emuenv, emuenv.cfg.current_config.backend_renderer);
+    emuenv.audio.set_global_volume(emuenv.cfg.current_config.audio_volume / 100.f);
 }
 
 void init_paths(Root &root_paths) {
@@ -297,17 +224,17 @@ bool init(EmuEnvState &state, Config &cfg, const Root &root_paths) {
     state.patch_path = root_paths.get_patch_path();
 
     // If configuration does not provide a preference path, use SDL's default
-    if (state.cfg.pref_path == root_paths.get_pref_path() || state.cfg.pref_path.empty())
+    if (state.cfg.pref_path == root_paths.get_pref_path() || state.cfg.pref_path.empty()) {
         state.pref_path = root_paths.get_pref_path();
-    else {
+    } else {
         auto last_char = state.cfg.pref_path.back();
         if (last_char != fs::path::preferred_separator && last_char != '/')
             state.cfg.pref_path += fs::path::preferred_separator;
         state.pref_path = state.cfg.get_pref_path();
     }
 
-    // Set initall current config for current backend renderer and custom driver with run app path if provided
-    gui::set_current_config(state, state.cfg.run_app_path.has_value() ? *state.cfg.run_app_path : "");
+    set_current_config(state, state.cfg.run_app_path.has_value() ? *state.cfg.run_app_path : "");
+
     LOG_INFO("backend-renderer: {}", state.cfg.current_config.backend_renderer);
 
     LOG_INFO("Base path: {}", state.base_path);
@@ -319,80 +246,6 @@ bool init(EmuEnvState &state, Config &cfg, const Root &root_paths) {
     LOG_INFO("User cache path: {}", state.cache_path);
 #endif
     LOG_INFO("User pref path: {}", state.pref_path);
-
-    if (ImGui::GetCurrentContext() == NULL) {
-        ImGui::CreateContext();
-    }
-    ImGuiIO &io = ImGui::GetIO();
-    io.IniFilename = NULL;
-
-    int window_type = 0;
-    switch (state.backend_renderer) {
-    case renderer::Backend::OpenGL:
-        window_type = SDL_WINDOW_OPENGL;
-        break;
-
-    case renderer::Backend::Vulkan:
-        window_type = SDL_WINDOW_VULKAN;
-        break;
-
-    default:
-        LOG_ERROR("Unimplemented backend renderer: {}.", state.cfg.backend_renderer);
-        break;
-    }
-
-#ifdef ANDROID
-    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
-    state.display.fullscreen = true;
-    window_type |= SDL_WINDOW_FULLSCREEN;
-#else
-    if (state.cfg.fullscreen) {
-        state.display.fullscreen = true;
-        window_type |= SDL_WINDOW_FULLSCREEN;
-    }
-#endif
-
-    state.manual_dpi_scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
-    state.window = WindowPtr(SDL_CreateWindow(window_title, DEFAULT_RES_WIDTH * state.manual_dpi_scale, DEFAULT_RES_HEIGHT * state.manual_dpi_scale, window_type | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY), SDL_DestroyWindow);
-    if (!state.window) {
-        LOG_ERROR("SDL failed to create window: {}", SDL_GetError());
-        return false;
-    }
-    state.manual_dpi_scale = SDL_GetDisplayContentScale(SDL_GetDisplayForWindow(state.window.get()));
-
-#ifdef _WIN32
-    // Disable round corners for the game window
-    const auto window_preference = DWMWCP_DONOTROUND;
-    HWND hwnd = (HWND)SDL_GetPointerProperty(SDL_GetWindowProperties(state.window.get()), SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
-    if (hwnd)
-        DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &window_preference, sizeof(window_preference));
-#endif
-
-    // initialize the renderer first because we need to know if we need a page table
-    if (!state.cfg.console) {
-        if (renderer::init(state.window.get(), state.renderer, state.backend_renderer, state.cfg, root_paths)) {
-            update_viewport(state);
-        } else {
-            switch (state.backend_renderer) {
-            case renderer::Backend::OpenGL:
-#ifdef ANDROID
-                error_dialog("Could not create OpenGL ES context!\nDoes your GPU support OpenGL ES 3.2?", nullptr);
-#else
-                error_dialog("Could not create OpenGL context!\nDoes your GPU at least support OpenGL 4.4?", nullptr);
-#endif
-                break;
-
-            case renderer::Backend::Vulkan:
-                error_dialog("Could not create Vulkan context!\nDoes your device support Vulkan?");
-                break;
-
-            default:
-                error_dialog(fmt::format("Unknown backend renderer: {}.", state.cfg.backend_renderer));
-                break;
-            }
-            return false;
-        }
-    }
 
     if (!init(state.io, state.cache_path, state.log_path, state.pref_path, state.cfg.console)) {
         LOG_ERROR("Failed to initialize file system for the emulator!");
@@ -444,9 +297,21 @@ bool late_init(EmuEnvState &state) {
     return true;
 }
 
-void destroy(EmuEnvState &emuenv, ImGui_State *imgui) {
-    ImGui_ImplSdl_Shutdown(imgui);
+void apply_renderer_config(EmuEnvState &emuenv) {
+    auto &r = *emuenv.renderer;
+    const auto &cc = emuenv.cfg.current_config;
 
+    r.res_multiplier = cc.resolution_multiplier;
+    r.set_surface_sync_state(cc.disable_surface_sync);
+    r.set_screen_filter(cc.screen_filter);
+    r.set_anisotropic_filtering(cc.anisotropic_filtering);
+    r.set_stretch_display(emuenv.cfg.stretch_the_display_area);
+    r.stretch_hd_pixel_perfect(emuenv.cfg.fullscreen_hd_res_pixel_perfect);
+    r.set_async_compilation(cc.async_pipeline_compilation);
+    emuenv.display.fps_hack = cc.fps_hack;
+}
+
+void destroy(EmuEnvState &emuenv) {
 #ifdef USE_DISCORD
     discordrpc::shutdown();
 #endif
@@ -461,16 +326,8 @@ void destroy(EmuEnvState &emuenv, ImGui_State *imgui) {
 
 void switch_state(EmuEnvState &emuenv, const bool pause) {
     if (pause) {
-#ifdef __ANDROID__
-        emuenv.display.imgui_render = true;
-        gui::set_controller_overlay_state(0);
-#endif
         emuenv.kernel.pause_threads();
     } else {
-#ifdef __ANDROID__
-        emuenv.display.imgui_render = false;
-        gui::set_controller_overlay_state(gui::get_overlay_display_mask(emuenv.cfg));
-#endif
         emuenv.kernel.resume_threads();
     }
     emuenv.audio.switch_state(pause);

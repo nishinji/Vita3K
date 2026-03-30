@@ -17,12 +17,12 @@
 
 #pragma once
 
+#include <app/state.h>
+
 #include <string>
 
 struct Config;
 struct EmuEnvState;
-struct SDL_Window;
-struct ImGui_State;
 class Root;
 
 namespace app {
@@ -38,17 +38,37 @@ enum class AppRunType {
 void init_paths(Root &root_paths);
 bool init(EmuEnvState &state, Config &cfg, const Root &root_paths);
 bool late_init(EmuEnvState &state);
-void destroy(EmuEnvState &emuenv, ImGui_State *imgui);
-void update_viewport(EmuEnvState &state);
+void apply_renderer_config(EmuEnvState &emuenv);
+void set_current_config(EmuEnvState &emuenv, const std::string &app_path);
+void destroy(EmuEnvState &emuenv);
 void switch_state(EmuEnvState &emuenv, const bool pause);
-void error_dialog(const std::string &message, SDL_Window *window = nullptr);
+
+bool init_game_list(EmuEnvState &emuenv);
+bool scan_games(EmuEnvState &emuenv);
+bool load_cached_games(EmuEnvState &emuenv);
+void save_game_cache(EmuEnvState &emuenv);
+Game read_game_info(EmuEnvState &emuenv, const std::string &title_id);
+void load_time_games(EmuEnvState &emuenv);
+void save_time_games(EmuEnvState &emuenv);
+void update_last_time_game_used(EmuEnvState &emuenv, const std::string &app_path);
+void update_game_time_used(EmuEnvState &emuenv, const std::string &app_path);
+void reset_last_time_game_used(EmuEnvState &emuenv, const std::string &app_path);
+void delete_game(EmuEnvState &emuenv, const std::string &app_path);
+std::vector<Game> get_games(const EmuEnvState &emuenv);
+std::map<std::string, GameTime> get_user_game_times(const EmuEnvState &emuenv);
+
+bool set_app_info(EmuEnvState &emuenv, const std::string &app_path);
+void reset_controller_binding(EmuEnvState &emuenv);
+
+void load_users(EmuEnvState &emuenv);
+void save_user(EmuEnvState &emuenv, const std::string &user_id);
+std::string create_user(EmuEnvState &emuenv, const std::string &name);
+void delete_user(EmuEnvState &emuenv, const std::string &user_id);
+bool activate_user(EmuEnvState &emuenv, const std::string &user_id);
 
 #ifdef __ANDROID__
 void add_custom_driver(EmuEnvState &emuenv);
 void remove_custom_driver(EmuEnvState &emuenv, const std::string &driver);
 #endif
-
-void set_window_title(EmuEnvState &emuenv);
-void calculate_fps(EmuEnvState &emuenv);
 
 } // namespace app
