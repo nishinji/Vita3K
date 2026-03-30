@@ -30,7 +30,9 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #endif
 
+#include <functional>
 #include <iostream>
+#include <mutex>
 #include <vector>
 
 namespace logging {
@@ -39,10 +41,30 @@ static const fs::path &LOG_FILE_NAME = "vita3k.log";
 static const char *LOG_PATTERN = "%^[%H:%M:%S.%e] |%L| [%!]: %v%$";
 static std::vector<spdlog::sink_ptr> sinks;
 
+static std::function<void(std::string, int)> s_log_callback;
+
 static void register_log_exception_handler();
 
 static void flush() {
     spdlog::details::registry::instance().flush_all();
+}
+
+template <typename Mutex>
+class callback_sink final : public spdlog::sinks::base_sink<Mutex> {
+protected:
+    void sink_it_(const spdlog::details::log_msg &msg) override {
+        spdlog::memory_buf_t formatted;
+        spdlog::sinks::base_sink<Mutex>::formatter_->format(msg, formatted);
+        s_log_callback(fmt::to_string(formatted), static_cast<int>(msg.level));
+    }
+
+    void flush_() override {};
+};
+
+using callback_sink_mt = callback_sink<std::mutex>;
+
+void set_log_callback(std::function<void(std::string, int)> cb) {
+    s_log_callback = std::move(cb);
 }
 
 ExitCode init(const Root &root_paths, bool use_stdout) {
@@ -53,6 +75,8 @@ ExitCode init(const Root &root_paths, bool use_stdout) {
 #else
         sinks.push_back(std::make_shared<spdlog::sinks::stdout_color_sink_mt>());
 #endif
+
+    sinks.push_back(std::make_shared<callback_sink_mt>());
 
     if (add_sink(root_paths.get_log_path() / LOG_FILE_NAME) != Success)
         return InitConfigFailed;
@@ -104,9 +128,7 @@ ExitCode add_sink(const fs::path &log_path) {
     }
 
 #ifdef _MSC_VER
-    if (sinks.size() == 2) { // spdlog is being initialized
         sinks.push_back(std::make_shared<spdlog::sinks::msvc_sink_mt>());
-    }
 #endif
 
     spdlog::set_default_logger(std::make_shared<spdlog::logger>("vita3k logger", begin(sinks), end(sinks)));
