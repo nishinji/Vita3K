@@ -52,6 +52,12 @@ struct SDL_GUIDComparator {
 
 typedef std::map<SDL_GUID, Controller, SDL_GUIDComparator> ControllerList;
 
+struct VirtualKeyboardState {
+    uint32_t buttons = 0;
+    uint32_t buttons_ext = 0;
+    float axes[4] = {};
+};
+
 struct CtrlState {
     std::mutex mutex;
     ControllerList controllers;
@@ -64,4 +70,6 @@ struct CtrlState {
 
     // last vsync the data was read
     uint64_t last_vcount[5] = {}; // sceCtrl ports.
+
+    VirtualKeyboardState keyboard_state;
 };

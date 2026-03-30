@@ -26,8 +26,6 @@
 #include <kernel/state.h>
 #include <util/log.h>
 
-#include <SDL3/SDL_keyboard.h>
-
 #ifdef ANDROID
 #include <SDL3/SDL_joystick.h>
 #include <jni.h>
@@ -94,9 +92,14 @@ static int reserve_port(CtrlState &state) {
     return -1;
 }
 
-SceCtrlExternalInputMode get_type_of_controller(const int idx) {
-    const auto type = SDL_GetGamepadTypeForID(idx);
-    return (type == SDL_GAMEPAD_TYPE_PS4) || (type == SDL_GAMEPAD_TYPE_PS5) ? SCE_CTRL_TYPE_DS4 : SCE_CTRL_TYPE_DS3;
+SceCtrlExternalInputMode get_type_of_controller(CtrlState &state, int port) {
+    for (const auto &[guid, controller] : state.controllers) {
+        if (controller.port == port) {
+            const auto type = SDL_GetGamepadType(controller.controller.get());
+            return (type == SDL_GAMEPAD_TYPE_PS4) || (type == SDL_GAMEPAD_TYPE_PS5) ? SCE_CTRL_TYPE_DS4 : SCE_CTRL_TYPE_DS3;
+        }
+    }
+    return SCE_CTRL_TYPE_DS3;
 }
 
 void refresh_controllers(CtrlState &state, EmuEnvState &emuenv) {
@@ -179,66 +182,15 @@ void refresh_controllers(CtrlState &state, EmuEnvState &emuenv) {
     state.has_motion_support = found_gyro && found_accel;
 }
 
-static float keys_to_axis(const bool *keys, SDL_Scancode code1, SDL_Scancode code2) {
-    float temp = 0;
-    if (keys[code1]) {
-        temp -= 1;
-    }
-    if (keys[code2]) {
-        temp += 1;
-    }
-
-    return temp;
-}
-
 static void apply_keyboard(uint32_t *buttons, float axes[4], bool ext, EmuEnvState &emuenv) {
-    const auto keys = SDL_GetKeyboardState(nullptr);
-    if (ext) {
-        if (keys[emuenv.cfg.keyboard_button_l1])
-            *buttons |= SCE_CTRL_L1;
-        if (keys[emuenv.cfg.keyboard_button_r1])
-            *buttons |= SCE_CTRL_R1;
-        if (keys[emuenv.cfg.keyboard_button_l2])
-            *buttons |= SCE_CTRL_L2;
-        if (keys[emuenv.cfg.keyboard_button_r2])
-            *buttons |= SCE_CTRL_R2;
-        if (keys[emuenv.cfg.keyboard_button_l3])
-            *buttons |= SCE_CTRL_L3;
-        if (keys[emuenv.cfg.keyboard_button_r3])
-            *buttons |= SCE_CTRL_R3;
-    } else {
-        if (keys[emuenv.cfg.keyboard_button_l1])
-            *buttons |= SCE_CTRL_L;
-        if (keys[emuenv.cfg.keyboard_button_r1])
-            *buttons |= SCE_CTRL_R;
-    }
-    if (keys[emuenv.cfg.keyboard_button_select])
-        *buttons |= SCE_CTRL_SELECT;
-    if (keys[emuenv.cfg.keyboard_button_start])
-        *buttons |= SCE_CTRL_START;
-    if (keys[emuenv.cfg.keyboard_button_up])
-        *buttons |= SCE_CTRL_UP;
-    if (keys[emuenv.cfg.keyboard_button_right])
-        *buttons |= SCE_CTRL_RIGHT;
-    if (keys[emuenv.cfg.keyboard_button_down])
-        *buttons |= SCE_CTRL_DOWN;
-    if (keys[emuenv.cfg.keyboard_button_left])
-        *buttons |= SCE_CTRL_LEFT;
-    if (keys[emuenv.cfg.keyboard_button_triangle])
-        *buttons |= SCE_CTRL_TRIANGLE;
-    if (keys[emuenv.cfg.keyboard_button_circle])
-        *buttons |= SCE_CTRL_CIRCLE;
-    if (keys[emuenv.cfg.keyboard_button_cross])
-        *buttons |= SCE_CTRL_CROSS;
-    if (keys[emuenv.cfg.keyboard_button_square])
-        *buttons |= SCE_CTRL_SQUARE;
-    if (keys[emuenv.cfg.keyboard_button_psbutton])
-        *buttons |= SCE_CTRL_PSBUTTON;
+    const auto &kb = emuenv.ctrl.keyboard_state;
+    const uint32_t kb_buttons = ext ? kb.buttons_ext : kb.buttons;
 
-    axes[0] += keys_to_axis(keys, static_cast<SDL_Scancode>(emuenv.cfg.keyboard_leftstick_left), static_cast<SDL_Scancode>(emuenv.cfg.keyboard_leftstick_right));
-    axes[1] += keys_to_axis(keys, static_cast<SDL_Scancode>(emuenv.cfg.keyboard_leftstick_up), static_cast<SDL_Scancode>(emuenv.cfg.keyboard_leftstick_down));
-    axes[2] += keys_to_axis(keys, static_cast<SDL_Scancode>(emuenv.cfg.keyboard_rightstick_left), static_cast<SDL_Scancode>(emuenv.cfg.keyboard_rightstick_right));
-    axes[3] += keys_to_axis(keys, static_cast<SDL_Scancode>(emuenv.cfg.keyboard_rightstick_up), static_cast<SDL_Scancode>(emuenv.cfg.keyboard_rightstick_down));
+    *buttons |= kb_buttons;
+    axes[0] += kb.axes[0];
+    axes[1] += kb.axes[1];
+    axes[2] += kb.axes[2];
+    axes[3] += kb.axes[3];
 }
 
 static std::array<ControllerBinding, 13> get_controller_bindings(EmuEnvState &emuenv) {
@@ -299,6 +251,8 @@ static uint8_t float_to_byte(float f) {
 }
 
 static void apply_controller(EmuEnvState &emuenv, uint32_t *buttons, float axes[4], SDL_Gamepad *controller, bool ext) {
+    const auto &axis_binds = emuenv.cfg.controller_axis_binds;
+
     if (ext) {
         for (const auto &binding : get_controller_bindings_ext(emuenv)) {
             if (SDL_GetGamepadButton(controller, binding.controller)) {
@@ -306,10 +260,10 @@ static void apply_controller(EmuEnvState &emuenv, uint32_t *buttons, float axes[
             }
         }
 
-        if (SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 0x3FFF) {
+        if (SDL_GetGamepadAxis(controller, static_cast<SDL_GamepadAxis>(axis_binds[4])) > 0x3FFF) {
             *buttons |= SCE_CTRL_L2;
         }
-        if (SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 0x3FFF) {
+        if (SDL_GetGamepadAxis(controller, static_cast<SDL_GamepadAxis>(axis_binds[5])) > 0x3FFF) {
             *buttons |= SCE_CTRL_R2;
         }
     } else {
@@ -321,10 +275,10 @@ static void apply_controller(EmuEnvState &emuenv, uint32_t *buttons, float axes[
     }
 
     auto &analog_multiplier = emuenv.cfg.controller_analog_multiplier;
-    axes[0] += axis_to_axis(SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_LEFTX), analog_multiplier);
-    axes[1] += axis_to_axis(SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_LEFTY), analog_multiplier);
-    axes[2] += axis_to_axis(SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_RIGHTX), analog_multiplier);
-    axes[3] += axis_to_axis(SDL_GetGamepadAxis(controller, SDL_GAMEPAD_AXIS_RIGHTY), analog_multiplier);
+    axes[0] += axis_to_axis(SDL_GetGamepadAxis(controller, static_cast<SDL_GamepadAxis>(axis_binds[0])), analog_multiplier);
+    axes[1] += axis_to_axis(SDL_GetGamepadAxis(controller, static_cast<SDL_GamepadAxis>(axis_binds[1])), analog_multiplier);
+    axes[2] += axis_to_axis(SDL_GetGamepadAxis(controller, static_cast<SDL_GamepadAxis>(axis_binds[2])), analog_multiplier);
+    axes[3] += axis_to_axis(SDL_GetGamepadAxis(controller, static_cast<SDL_GamepadAxis>(axis_binds[3])), analog_multiplier);
 }
 
 static void retrieve_ctrl_data(EmuEnvState &emuenv, int port, bool is_v2, bool negative, bool from_ext_function, SceUInt32 &buttons, SceUInt8 &lx, SceUInt8 &ly, SceUInt8 &rx, SceUInt8 &ry) {
