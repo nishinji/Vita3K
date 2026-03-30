@@ -16,11 +16,11 @@
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 #include <lang/functions.h>
+#include <util/log.h>
 #include <lang/state.h>
 
 #include <config/state.h>
 #include <dialog/state.h>
-#include <gui/state.h>
 #include <ime/state.h>
 #include <util/fs.h>
 #include <util/vector_utils.h>
@@ -213,8 +213,8 @@ void init_lang(LangState &lang, EmuEnvState &emuenv) {
                     const auto states = compatibility_child.child("states");
                     if (!states.empty()) {
                         for (const auto state : states) {
-                            const auto id = static_cast<compat::CompatibilityState>(state.attribute("id").as_int());
-                            lang_compatibility.states[id] = state.text().as_string();
+                            const auto id = static_cast<CompatibilityState>(state.attribute("id").as_int());
+                            //lang_compatibility.states[id] = state.text().as_string();
                         }
                     }
                 }

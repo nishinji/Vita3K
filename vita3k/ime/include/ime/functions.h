@@ -23,9 +23,16 @@
 #include <utility>
 #include <vector>
 
-namespace gui {
+void init_ime_lang(Ime &ime, SceImeLanguage lang);
+void set_ime_default_layout(Ime &ime);
 
-void init_ime_lang(Ime &ime, const SceImeLanguage &lang);
-std::vector<std::pair<SceImeLanguage, std::string>>::const_iterator get_ime_lang_index(Ime &ime, const SceImeLanguage &lang);
+void ime_update_key(Ime &ime, const std::u16string &key);
+void ime_update_ponct(Ime &ime, const std::u16string &key);
+void ime_reset_preedit(Ime &ime);
+void ime_cursor_left(Ime &ime);
+void ime_cursor_right(Ime &ime);
+void ime_backspace(Ime &ime);
+void ime_toggle_shift(Ime &ime);
 
-} // namespace gui
+std::vector<std::pair<SceImeLanguage, std::string>>::const_iterator
+get_ime_lang_index(Ime &ime, SceImeLanguage lang);

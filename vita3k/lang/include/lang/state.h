@@ -85,19 +85,6 @@ struct DialogLangState {
     SaveData save_data;
 };
 
-struct ImeLangState {
-    std::vector<std::pair<SceImeLanguage, std::string>> ime_keyboards = {
-        { SCE_IME_LANGUAGE_DANISH, "Danish" }, { SCE_IME_LANGUAGE_GERMAN, "German" },
-        { SCE_IME_LANGUAGE_ENGLISH_GB, "English (United Kingdom)" }, { SCE_IME_LANGUAGE_ENGLISH_US, "English (United States)" },
-        { SCE_IME_LANGUAGE_SPANISH, "Spanish" }, { SCE_IME_LANGUAGE_FRENCH, "French" },
-        { SCE_IME_LANGUAGE_ITALIAN, "Italian" }, { SCE_IME_LANGUAGE_DUTCH, "Dutch" },
-        { SCE_IME_LANGUAGE_NORWEGIAN, "Norwegian" }, { SCE_IME_LANGUAGE_POLISH, "Polish" },
-        { SCE_IME_LANGUAGE_PORTUGUESE_BR, "Portuguese (Brazil)" }, { SCE_IME_LANGUAGE_PORTUGUESE_PT, "Portuguese (Portugal)" },
-        { SCE_IME_LANGUAGE_RUSSIAN, "Russian" }, { SCE_IME_LANGUAGE_FINNISH, "Finnish" },
-        { SCE_IME_LANGUAGE_SWEDISH, "Swedish" }, { SCE_IME_LANGUAGE_TURKISH, "Turkish" }
-    };
-};
-
 struct LangState {
     struct MainMenubar {
         std::map<std::string, std::string> file = {
@@ -232,16 +219,6 @@ struct LangState {
     AppContext app_context;
     struct Compatibility {
         std::string name = "Compatibility";
-        std::map<compat::CompatibilityState, std::string> states = {
-            { compat::UNKNOWN, "Unknown" },
-            { compat::NOTHING, "Nothing" },
-            { compat::BOOTABLE, "Bootable" },
-            { compat::INTRO, "Intro" },
-            { compat::MENU, "Menu" },
-            { compat::INGAME_LESS, "Ingame -" },
-            { compat::INGAME_MORE, "Ingame +" },
-            { compat::PLAYABLE, "Playable" }
-        };
     };
     Compatibility compatibility;
     std::map<std::string, std::string> compat_db = {
