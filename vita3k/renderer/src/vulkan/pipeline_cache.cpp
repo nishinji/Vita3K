@@ -227,7 +227,11 @@ void PipelineCache::init(bool support_rasterized_order_access) {
 
     const int nb_logical_threads = SDL_GetNumLogicalCPUCores();
     // took this from RPCS3 (slightly modified)
-    if (nb_logical_threads > 12)
+    if (nb_logical_threads >= 24)
+        nb_worker_threads = 12;
+    else if (nb_logical_threads >= 16)
+        nb_worker_threads = 8;
+    else if (nb_logical_threads > 12)
         nb_worker_threads = 6;
     else if (nb_logical_threads > 8)
         nb_worker_threads = 4;
