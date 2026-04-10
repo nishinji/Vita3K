@@ -71,8 +71,8 @@ bool ScreenRenderer::setup() {
     const vk::FormatProperties d24u8_support = state.physical_device.getFormatProperties(vk::Format::eD24UnormS8Uint);
     const vk::FormatProperties d32u8_support = state.physical_device.getFormatProperties(vk::Format::eD32SfloatS8Uint);
 
-    bool support_d24u8 = static_cast<bool>(d24u8_support.optimalTilingFeatures & vk::FormatFeatureFlagBits::eDepthStencilAttachment);
-    bool support_d32u8 = static_cast<bool>(d32u8_support.optimalTilingFeatures & vk::FormatFeatureFlagBits::eDepthStencilAttachment);
+    const bool support_d24u8 = static_cast<bool>(d24u8_support.optimalTilingFeatures & vk::FormatFeatureFlagBits::eDepthStencilAttachment);
+    const bool support_d32u8 = static_cast<bool>(d32u8_support.optimalTilingFeatures & vk::FormatFeatureFlagBits::eDepthStencilAttachment);
 
     for (const auto &format : surface_formats) {
         // actually we don't care that much because we will just be copying what the game rendered
@@ -88,14 +88,14 @@ bool ScreenRenderer::setup() {
         surface_format = surface_formats[0];
 
     if (support_d32u8) {
-        LOG_INFO_ONCE("Your device support high deep stencil quality");
-        state.deep_stencil_use = vk::Format::eD32SfloatS8Uint;
+        LOG_INFO_ONCE("Your device supports high depth stencil quality");
+        state.depth_stencil_format = vk::Format::eD32SfloatS8Uint;
     } else if (support_d24u8) {
-        state.deep_stencil_use = vk::Format::eD24UnormS8Uint;
+        state.depth_stencil_format = vk::Format::eD24UnormS8Uint;
     } else {
-        LOG_WARN_ONCE("Your device doesn't support standard deep stencil ");
-        // vk::Format::eD16UnormS8Uint didn't support in Android
-        state.deep_stencil_use = vk::Format::eD16Unorm;
+        LOG_WARN_ONCE("Your device doesn't support standard depth stencil");
+        // vk::Format::eD16UnormS8Uint format is not supported on Android
+        state.depth_stencil_format = vk::Format::eD16Unorm;
     }
 
     // preferred order : mailbox > fifo_relaxed > fifo > whatever
