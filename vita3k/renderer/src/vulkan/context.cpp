@@ -449,7 +449,7 @@ void VKContext::stop_recording(const SceGxmNotification &notif1, const SceGxmNot
     }
 
     ColorSurfaceCacheInfo *surface_info = nullptr;
-    if (state.features.enable_memory_mapping && !state.disable_surface_sync && submit)
+    if (state.features.enable_memory_mapping && !state.enable_surface_sync && submit)
         surface_info = state.surface_cache.perform_surface_sync();
 
     prerender_cmd.end();

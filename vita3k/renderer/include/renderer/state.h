@@ -123,7 +123,7 @@ struct State {
     Backend current_backend;
     FeatureState features;
     float res_multiplier;
-    bool disable_surface_sync;
+    bool enable_surface_sync;
     bool stretch_the_display_area;
     bool fullscreen_hd_res_pixel_perfect;
     bool fullscreen = false;
@@ -213,8 +213,8 @@ struct State {
     virtual void set_anisotropic_filtering(int anisotropic_filtering) = 0;
     virtual int get_max_2d_texture_width() = 0;
     virtual void set_async_compilation(bool enable) {}
-    void set_surface_sync_state(bool disable) {
-        disable_surface_sync = disable;
+    void set_surface_sync_state(bool enable) {
+        enable_surface_sync = enable;
     }
     void set_vsync_state(bool enable) {
         pending_vsync.store(enable ? 1 : 0, std::memory_order_relaxed);

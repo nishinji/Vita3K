@@ -1112,7 +1112,7 @@ Framebuffer &VKSurfaceCache::retrieve_framebuffer_handle(MemState &mem, SceGxmCo
 }
 
 bool VKSurfaceCache::check_for_surface(MemState &mem, Address source_address, CallbackRequestFunction &callback, Address target_address) {
-    if (!state.features.enable_memory_mapping || state.disable_surface_sync)
+    if (!state.features.enable_memory_mapping || state.enable_surface_sync)
         return false;
 
     if (vector_utils::find_index(cpu_surfaces_changed, source_address) != -1) {
