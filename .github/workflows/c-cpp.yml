@@ -300,9 +300,8 @@ jobs:
     concurrency:
       group: create-release
       cancel-in-progress: false
-    if: |
-      github.ref == 'refs/heads/master' &&
-      github.repository == 'Vita3K/Vita3K'
+    # if: |
+    #   github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v6
         with:
@@ -329,16 +328,16 @@ jobs:
       - name: Prepare release artifacts
         run: bash ./.ci/release-collect.sh
 
-      - name: Upload to store repository
-        uses: tcnksm/ghr@v0
-        with:
-          tag: ${{ env.BUILD_VARIABLE }}
-          path: artifacts-store/
-          owner: ${{ github.repository_owner }}
-          repository: Vita3K-builds
-          name: "Build: ${{ env.BUILD_VARIABLE }}"
-          body: "Corresponding commit: [${{ env.LAST_COMMIT_MESSAGE }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }}) (${{ env.COMMITTER_NAME }})"
-          token: ${{ secrets.STORE_TOKEN }}
+      # - name: Upload to store repository
+      #   uses: tcnksm/ghr@v0
+      #   with:
+      #     tag: ${{ env.BUILD_VARIABLE }}
+      #     path: artifacts-store/
+      #     owner: ${{ github.repository_owner }}
+      #     repository: Vita3K-builds
+      #     name: "Build: ${{ env.BUILD_VARIABLE }}"
+      #     body: "Corresponding commit: [${{ env.LAST_COMMIT_MESSAGE }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }}) (${{ env.COMMITTER_NAME }})"
+      #     token: ${{ secrets.STORE_TOKEN }}
 
       - name: Upload to master repository
         uses: tcnksm/ghr@v0
