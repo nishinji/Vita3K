@@ -57,10 +57,10 @@ GLContext::GLContext()
     std::memset(&previous_frag_info, 0, sizeof(shader::RenderFragUniformBlock));
 }
 
-static GLenum translate_blend_func(SceGxmBlendFunc src) {
+static GLenum translate_blend_func(SceGxmBlendFunc blend_func) {
     R_PROFILE(__func__);
 
-    switch (src) {
+    switch (blend_func) {
     case SCE_GXM_BLEND_FUNC_ADD:
         return GL_FUNC_ADD;
     case SCE_GXM_BLEND_FUNC_SUBTRACT:
@@ -72,14 +72,15 @@ static GLenum translate_blend_func(SceGxmBlendFunc src) {
     case SCE_GXM_BLEND_FUNC_MAX:
         return GL_MAX;
     default:
+        LOG_ERROR("Unknown blend func: {}", std::to_underlying(blend_func));
         return GL_FUNC_ADD;
     }
 }
 
-static GLenum translate_blend_factor(SceGxmBlendFactor src) {
+static GLenum translate_blend_factor(SceGxmBlendFactor blend_factor) {
     R_PROFILE(__func__);
 
-    switch (src) {
+    switch (blend_factor) {
     case SCE_GXM_BLEND_FACTOR_ZERO:
         return GL_ZERO;
     case SCE_GXM_BLEND_FACTOR_ONE:
@@ -105,6 +106,7 @@ static GLenum translate_blend_factor(SceGxmBlendFactor src) {
     case SCE_GXM_BLEND_FACTOR_DST_ALPHA_SATURATE:
         return GL_DST_ALPHA; // TODO Not supported.
     default:
+        LOG_ERROR("Unknown blend factor: {}", std::to_underlying(blend_factor));
         return GL_ZERO;
     }
 }
@@ -696,8 +698,6 @@ void GLState::render_frame(DisplayState &display, const GxmState &gxm, MemState 
         // Check if the surface exists
         float uvs[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
         bool need_uv = true;
-
-        const std::size_t texture_data_size = static_cast<size_t>(display_frame.pitch) * static_cast<size_t>(display_frame.image_size.y) * sizeof(uint32_t);
 
         SceFVector2 texture_size;
 

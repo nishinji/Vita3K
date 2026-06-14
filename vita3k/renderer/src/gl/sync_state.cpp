@@ -55,9 +55,10 @@ static GLenum translate_depth_func(SceGxmDepthFunc depth_func) {
         return GL_GEQUAL;
     case SCE_GXM_DEPTH_FUNC_ALWAYS:
         return GL_ALWAYS;
+    default:
+        LOG_ERROR("Unknown depth func: {}", std::to_underlying(depth_func));
+        return GL_ALWAYS;
     }
-
-    return GL_ALWAYS;
 }
 
 static GLenum translate_stencil_op(SceGxmStencilOp stencil_op) {
@@ -80,9 +81,10 @@ static GLenum translate_stencil_op(SceGxmStencilOp stencil_op) {
         return GL_INCR_WRAP;
     case SCE_GXM_STENCIL_OP_DECR_WRAP:
         return GL_DECR_WRAP;
+    default:
+        LOG_ERROR("Unknown stencil op: {}", std::to_underlying(stencil_op));
+        return GL_KEEP;
     }
-
-    return GL_KEEP;
 }
 
 static GLenum translate_stencil_func(SceGxmStencilFunc stencil_func) {
@@ -105,9 +107,10 @@ static GLenum translate_stencil_func(SceGxmStencilFunc stencil_func) {
         return GL_GEQUAL;
     case SCE_GXM_STENCIL_FUNC_ALWAYS:
         return GL_ALWAYS;
+    default:
+        LOG_ERROR("Unknown stencil func: {}", std::to_underlying(stencil_func));
+        return GL_ALWAYS;
     }
-
-    return GL_ALWAYS;
 }
 
 void sync_mask(const GLState &state, GLContext &context, const MemState &mem) {
