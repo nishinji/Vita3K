@@ -15,6 +15,8 @@
 #if defined(__APPLE__)
 #include <sys/sysctl.h>
 extern char **environ;
+#elif defined(__ANDROID__)
+#include<sys / system_properties.h>
 #elif defined(unix) || defined(__unix) || defined(__unix__)
 #include <cstring>
 #include <fstream>
@@ -53,6 +55,17 @@ std::string Environment::OSVersion() {
     }
 
     return "<cygwin>";
+#elif defined(__ANDROID__)
+    char version[PROP_VALUE_MAX] = {};
+    char model[PROP_VALUE_MAX] = {};
+    __system_property_get("ro.build.version.release", version);
+    __system_property_get("ro.product.model", model);
+    std::string result = "Android ";
+    result += version;
+    result += " (";
+    result += model;
+    result += ")";
+    return result;
 #elif defined(linux) || defined(__linux) || defined(__linux__)
     static std::regex pattern("DISTRIB_DESCRIPTION=\"(.*)\"");
 

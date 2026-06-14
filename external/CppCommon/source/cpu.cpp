@@ -11,6 +11,10 @@
 
 #if defined(__APPLE__)
 #include <sys/sysctl.h>
+#elif defined(__ANDROID__)
+#include <sys/system_properties.h>
+#include <fstream>
+#include <unistd.h>
 #elif defined(unix) || defined(__unix) || defined(__unix__)
 #include <fstream>
 #include <regex>
@@ -54,6 +58,12 @@ std::string CPU::Architecture() {
         return result;
 
     return "<unknown>";
+#elif defined(__ANDROID__)
+    char hw[PROP_VALUE_MAX] = {};
+    __system_property_get("ro.hardware", hw);
+    char soc[PROP_VALUE_MAX] = {};
+    __system_property_get("ro.soc.model", soc);
+    return (soc[0] != '\0') ? std::string(soc) : std::string(hw[0] != '\0' ? hw : "<unknown>");
 #elif defined(unix) || defined(__unix) || defined(__unix__)
     static std::regex pattern("model name(.*): (.*)");
 
@@ -191,6 +201,15 @@ int64_t CPU::ClockSpeed() {
     size_t size = sizeof(frequency);
     if (sysctlbyname("hw.cpufrequency", &frequency, &size, nullptr, 0) == 0)
         return frequency;
+
+    return -1;
+#elif defined(__ANDROID__)
+    {
+        std::ifstream f("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq");
+        long khz = 0;
+        if (f >> khz && khz > 0)
+            return khz / 1000LL;
+    }
 
     return -1;
 #elif defined(unix) || defined(__unix) || defined(__unix__)
