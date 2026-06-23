@@ -17,6 +17,8 @@ jobs:
   format-check:
     name: Format Check (${{ matrix.path }})
     runs-on: ubuntu-latest
+    env:
+      CLANG_FORMAT_VERSION: "22"
 
     strategy:
       fail-fast: false
@@ -35,3 +37,20 @@ jobs:
         uses: jidicula/clang-format-action@v4.18.0
         with:
           check-path: ${{ matrix.path }}
+
+      - name: Show formatting diff
+        if: failure()
+        run: |
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            --entrypoint sh \
+            -v "${{ github.workspace }}:/src" \
+            -w /src \
+            "ghcr.io/jidicula/clang-format:${{ env.CLANG_FORMAT_VERSION }}" \
+            -c 'find "${{ matrix.path }}" \
+                  \( -name "*.c"  -o -name "*.cpp" -o -name "*.cc" -o -name "*.cxx" \
+                  -o -name "*.h"  -o -name "*.hpp" -o -name "*.hh" -o -name "*.hxx" \) \
+                  -print0 | xargs -0 -r clang-format -i'
+          git --no-pager diff --color=always
+          echo "::endgroup::"
+          exit 1
