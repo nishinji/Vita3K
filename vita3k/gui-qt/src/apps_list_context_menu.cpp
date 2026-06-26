@@ -31,9 +31,7 @@
 #include <packages/sce_types.h>
 #include <renderer/state.h>
 #include <util/log.h>
-
-#include <include/cpu.h>
-#include <include/environment.h>
+#include <util/sysinfo.h>
 
 #include <SDL3/SDL_cpuinfo.h>
 
@@ -262,8 +260,8 @@ void AppsListContextMenu::add_compat_actions(const app::AppEntry &app) {
                     "- GPU: {}\n"
                     "- RAM: {} GB",
                     user ? user : "?",
-                    CppCommon::Environment::OSVersion(),
-                    CppCommon::CPU::Architecture(),
+                    util::get_system_info(),
+                    util::get_cpu_brand(),
                     gpu_name,
                     SDL_GetSystemRAM() / 1000);
                 QApplication::clipboard()->setText(QString::fromStdString(summary));
@@ -306,8 +304,8 @@ void AppsListContextMenu::add_compat_actions(const app::AppEntry &app) {
                     "- GPU: {}%0A"
                     "- RAM: {} GB",
                     user ? user : "?",
-                    CppCommon::Environment::OSVersion(),
-                    CppCommon::CPU::Architecture(),
+                    util::get_system_info(),
+                    util::get_cpu_brand(),
                     gpu_name,
                     SDL_GetSystemRAM() / 1000);
 

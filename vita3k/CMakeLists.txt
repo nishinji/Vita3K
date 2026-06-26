@@ -24,7 +24,7 @@ if("$ENV{GITHUB_EVENT_NAME}" STREQUAL "pull_request")
 	else()
 		set(CMD bash -c "jq .pull_request.head.repo.html_url $ENV{GITHUB_EVENT_PATH} | tr -d \\\" ")
 	endif()
-else() 
+else()
 	execute_process(
 		COMMAND git rev-parse --abbrev-ref HEAD
 		WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
@@ -209,7 +209,7 @@ if(WIN32)
 	target_sources(vita3k PRIVATE util/src/vc_runtime_checker.cpp)
 endif()
 
-target_link_libraries(vita3k PRIVATE app audio compat config cppcommon ctrl dialog display ime lang gdbstub gxm io miniz modules motion packages patch renderer shader touch util psvpfsparser)
+target_link_libraries(vita3k PRIVATE app audio compat config ctrl dialog display ime lang gdbstub gxm io miniz modules motion packages patch renderer shader touch util psvpfsparser)
 if(NOT ANDROID)
 	target_link_libraries(vita3k PRIVATE gui-qt)
 endif()

@@ -20,6 +20,8 @@
 
 #include <fmt/format.h>
 
+#include <util/sysinfo.h>
+
 #include <algorithm>
 #include <cmath>
 
@@ -72,6 +74,7 @@ void perf_overlay::set_fps_data(uint32_t fps, uint32_t avg_fps, uint32_t min_fps
     m_min_fps = min_fps;
     m_max_fps = max_fps;
     m_ms_per_frame = ms_per_frame;
+    m_ram_used = util::get_process_memory_usage();
 
     if (changed || m_force_repaint) {
         if (m_graph_enabled && fps_values && fps_values_count > 0) {
@@ -97,9 +100,11 @@ void perf_overlay::update_text() {
     case perf_detail_level::medium:
     case perf_detail_level::maximum:
         text = fmt::format("FPS: {} ({} ms)\n"
-                           "Avg: {}  Min: {}  Max: {}",
+                           "Avg: {}  Min: {}  Max: {}"
+                           "RAM: {} MiB",
             m_fps, m_ms_per_frame,
-            m_avg_fps, m_min_fps, m_max_fps);
+            m_avg_fps, m_min_fps, m_max_fps,
+            m_ram_used / (1024 * 1024));
         break;
     }
 

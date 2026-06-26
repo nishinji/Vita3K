@@ -64,9 +64,6 @@ target_include_directories(stb INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/stb")
 add_library(ddspp INTERFACE)
 target_include_directories(ddspp INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/ddspp")
 
-add_library(cppcommon STATIC CppCommon/source/cpu.cpp CppCommon/source/environment.cpp)
-target_include_directories(cppcommon PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/CppCommon")
-
 add_library(glad STATIC "${CMAKE_CURRENT_SOURCE_DIR}/glad/src/glad.c")
 target_include_directories(glad PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/glad/include")
 
@@ -232,7 +229,7 @@ if(APPLE)
 			"${CMAKE_BINARY_DIR}/external/MoltenVK-macos.tar" SHOW_PROGRESS)
 	endif()
 	if(NOT EXISTS "${CMAKE_BINARY_DIR}/external/MoltenVK")
-		execute_process(COMMAND tar xf "${CMAKE_BINARY_DIR}/external/MoltenVK-macos.tar" --strip-components=1 MoltenVK/MoltenVK 
+		execute_process(COMMAND tar xf "${CMAKE_BINARY_DIR}/external/MoltenVK-macos.tar" --strip-components=1 MoltenVK/MoltenVK
 			WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/external")
 	endif()
 	target_include_directories(vulkan INTERFACE "${CMAKE_BINARY_DIR}/external/MoltenVK/include")
@@ -326,7 +323,7 @@ if(NOT OPENSSL_FOUND OR FORCE_BUILD_OPENSSL_MAC)
 				if(NOT EXISTS "${CMAKE_BINARY_DIR}/external/openssl/arm64")
 					file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/external/openssl/arm64")
 					execute_process(COMMAND perl ../Configure darwin64-arm64 -mmacosx-version-min=11 WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/external/openssl/arm64")
-					execute_process(COMMAND make -j${CPU_COUNT} WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/external/openssl/arm64" OUTPUT_QUIET)	
+					execute_process(COMMAND make -j${CPU_COUNT} WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/external/openssl/arm64" OUTPUT_QUIET)
 				endif()
 				if(NOT EXISTS "${CMAKE_BINARY_DIR}/external/openssl/x86_64")
 					file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/external/openssl/x86_64")
