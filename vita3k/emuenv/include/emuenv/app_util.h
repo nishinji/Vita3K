@@ -20,6 +20,8 @@
 #include <mem/ptr.h>
 #include <util/types.h>
 
+#include <vector>
+
 typedef SceUInt32 SceAppUtilBootAttribute;
 typedef SceUInt32 SceAppUtilAppEventType;
 typedef SceUInt32 SceAppUtilSaveDataSlotId;
@@ -173,3 +175,8 @@ enum SceAppUtilErrorCode : uint32_t {
 
 std::string construct_savedata0_path(const std::string &data, const char *ext = "");
 std::string construct_slotparam_path(const unsigned int data);
+
+struct EmuEnvState;
+bool sdslot_read_slot_param(EmuEnvState &emuenv, uint32_t slot_id, SceAppUtilSaveDataSlotParam *param, const char *export_name);
+void sdslot_load_table(EmuEnvState &emuenv, std::vector<uint8_t> &table, const char *export_name);
+bool sdslot_get_slot_param(const std::vector<uint8_t> &table, uint32_t slot_id, SceAppUtilSaveDataSlotParam *param);
