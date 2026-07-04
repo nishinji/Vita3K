@@ -322,24 +322,28 @@ static bool sdslot_import_legacy(EmuEnvState &emuenv, std::vector<uint8_t> &buf,
     return found;
 }
 
-// Load the current full-size slot table: prefer sdslot.dat, otherwise fall back
-// to importing the legacy per-slot files. buf is always left at full size.
-void sdslot_load_table(EmuEnvState &emuenv, std::vector<uint8_t> &buf, const char *export_name) {
-    if (sdslot_read_all(emuenv, buf, export_name))
-        sdslot_make_full(buf); // expand/clamp older or partial files to full size
-    else
-        sdslot_import_legacy(emuenv, buf, export_name);
-}
-
-// Extract one slot's parameters from an already-loaded table (no file I/O).
-bool sdslot_get_slot_param(const std::vector<uint8_t> &table, uint32_t slot_id, SceAppUtilSaveDataSlotParam *param) {
-    if (slot_id >= SDSLOT_MAX_SLOTS)
-        return false;
-    const size_t flag = SDSLOT_FLAG_BASE + slot_id;
-    const size_t off = SDSLOT_DATA_BASE + static_cast<size_t>(slot_id) * SDSLOT_BLOCK_SIZE;
-    if (flag >= table.size() || table[flag] == 0 || off + SDSLOT_PARAM_SIZE > table.size())
-        return false;
-    std::memcpy(param, table.data() + off, SDSLOT_PARAM_SIZE);
+// Make sure a valid full-size sdslot.dat exists on disk. If it is missing,
+// build it once from the legacy per-slot SlotParam_<n>.bin files; if it has an
+// unexpected size (older or partial file), normalise it to full size once.
+// This full-file pass only ever happens on this one-time creation/migration;
+// all regular reads and writes below touch just the requested slot.
+static bool sdslot_ensure_file(EmuEnvState &emuenv, const char *export_name) {
+    const auto fd = open_file(emuenv.io, construct_sdslot_path().c_str(), SCE_O_RDONLY, emuenv.vita_fs_path, export_name);
+    if (fd >= 0) {
+        const SceOff size = seek_file(fd, 0, SCE_SEEK_END, emuenv.io, export_name);
+        close_file(emuenv.io, fd, export_name);
+        if (size == static_cast<SceOff>(SDSLOT_TOTAL_SIZE))
+            return true;
+        std::vector<uint8_t> buf;
+        if (!sdslot_read_all(emuenv, buf, export_name))
+            return false;
+        sdslot_make_full(buf);
+        sdslot_write_all(emuenv, buf, export_name);
+        return true;
+    }
+    std::vector<uint8_t> buf;
+    sdslot_import_legacy(emuenv, buf, export_name);
+    sdslot_write_all(emuenv, buf, export_name);
     return true;
 }
 
@@ -378,21 +382,41 @@ bool sdslot_read_slot_param(EmuEnvState &emuenv, uint32_t slot_id, SceAppUtilSav
 static void sdslot_write_slot_param(EmuEnvState &emuenv, uint32_t slot_id, const SceAppUtilSaveDataSlotParam *param, const char *export_name) {
     if (slot_id >= SDSLOT_MAX_SLOTS)
         return;
-    std::vector<uint8_t> buf;
-    sdslot_load_table(emuenv, buf, export_name); // sdslot.dat, else migrate legacy; always full size
-    buf[SDSLOT_FLAG_BASE + slot_id] = 1;
-    std::memcpy(buf.data() + SDSLOT_DATA_BASE + static_cast<size_t>(slot_id) * SDSLOT_BLOCK_SIZE, param, SDSLOT_PARAM_SIZE);
-    sdslot_write_all(emuenv, buf, export_name);
+    if (!sdslot_ensure_file(emuenv, export_name))
+        return;
+
+    // Patch only this slot's 1-byte flag and its 844-byte block in place, the
+    // same way sdslot_read_slot_param reads, instead of rewriting all 256
+    // slots on every save.
+    const auto fd = open_file(emuenv.io, construct_sdslot_path().c_str(), SCE_O_WRONLY, emuenv.vita_fs_path, export_name);
+    if (fd < 0)
+        return;
+    const uint8_t flag = 1;
+    seek_file(fd, static_cast<SceOff>(SDSLOT_FLAG_BASE) + slot_id, SCE_SEEK_SET, emuenv.io, export_name);
+    write_file(fd, &flag, sizeof(flag), emuenv.io, export_name);
+    seek_file(fd, static_cast<SceOff>(SDSLOT_DATA_BASE) + static_cast<SceOff>(slot_id) * SDSLOT_BLOCK_SIZE, SCE_SEEK_SET, emuenv.io, export_name);
+    write_file(fd, param, SDSLOT_PARAM_SIZE, emuenv.io, export_name);
+    close_file(emuenv.io, fd, export_name);
 }
 
 static void sdslot_delete_slot(EmuEnvState &emuenv, uint32_t slot_id, const char *export_name) {
     if (slot_id >= SDSLOT_MAX_SLOTS)
         return;
-    std::vector<uint8_t> buf;
-    sdslot_load_table(emuenv, buf, export_name); // sdslot.dat, else migrate legacy; always full size
-    buf[SDSLOT_FLAG_BASE + slot_id] = 0;
-    std::memset(buf.data() + SDSLOT_DATA_BASE + static_cast<size_t>(slot_id) * SDSLOT_BLOCK_SIZE, 0, SDSLOT_BLOCK_SIZE);
-    sdslot_write_all(emuenv, buf, export_name);
+    if (!sdslot_ensure_file(emuenv, export_name))
+        return;
+
+    // Clear only this slot's flag and block in place instead of rewriting the
+    // whole file.
+    const auto fd = open_file(emuenv.io, construct_sdslot_path().c_str(), SCE_O_WRONLY, emuenv.vita_fs_path, export_name);
+    if (fd < 0)
+        return;
+    const uint8_t flag = 0;
+    seek_file(fd, static_cast<SceOff>(SDSLOT_FLAG_BASE) + slot_id, SCE_SEEK_SET, emuenv.io, export_name);
+    write_file(fd, &flag, sizeof(flag), emuenv.io, export_name);
+    const std::vector<uint8_t> zero_block(SDSLOT_BLOCK_SIZE, 0);
+    seek_file(fd, static_cast<SceOff>(SDSLOT_DATA_BASE) + static_cast<SceOff>(slot_id) * SDSLOT_BLOCK_SIZE, SCE_SEEK_SET, emuenv.io, export_name);
+    write_file(fd, zero_block.data(), SDSLOT_BLOCK_SIZE, emuenv.io, export_name);
+    close_file(emuenv.io, fd, export_name);
 }
 
 EXPORT(int, sceAppUtilSaveDataDataRemove, SceAppUtilSaveDataFileSlot *slot, SceAppUtilSaveDataRemoveItem *files, unsigned int fileNum, SceAppUtilMountPoint *mountPoint) {
@@ -539,8 +563,6 @@ EXPORT(SceInt32, sceAppUtilSaveDataSlotSearch, SceAppUtilWorkBuffer *workBuf, co
 
     result->hitNum = 0;
     auto slotList = result->slotList.get(emuenv.mem);
-    std::vector<uint8_t> sdslot_table;
-    sdslot_load_table(emuenv, sdslot_table, export_name); // read sdslot.dat once for the whole range
     for (auto i = cond->from; i < (cond->from + cond->range); i++) {
         if (slotList) {
             slotList[i].id = -1;
@@ -550,7 +572,7 @@ EXPORT(SceInt32, sceAppUtilSaveDataSlotSearch, SceAppUtilWorkBuffer *workBuf, co
         }
 
         SceAppUtilSaveDataSlotParam param{};
-        const bool exist = sdslot_get_slot_param(sdslot_table, i, &param);
+        const bool exist = sdslot_read_slot_param(emuenv, i, &param, export_name);
         switch (cond->type) {
         case SCE_APPUTIL_SAVEDATA_SLOT_SEARCH_TYPE_EXIST_SLOT:
             if (exist) {

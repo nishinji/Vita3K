@@ -903,7 +903,7 @@ EXPORT(int, sceSaveDataDialogAbort) {
     return 0;
 }
 
-static void check_save_file(const uint32_t index, EmuEnvState &emuenv, const std::vector<uint8_t> &sdslot_table, const char *export_name) {
+static void check_save_file(const uint32_t index, EmuEnvState &emuenv, const char *export_name) {
     emuenv.common_dialog.savedata.title[index].clear();
     emuenv.common_dialog.savedata.subtitle[index].clear();
     emuenv.common_dialog.savedata.icon_texture[index] = {};
@@ -913,7 +913,7 @@ static void check_save_file(const uint32_t index, EmuEnvState &emuenv, const std
     icon_buf_tmp.clear();
 
     SceAppUtilSaveDataSlotParam slot_param{};
-    const bool slot_exists = sdslot_get_slot_param(sdslot_table, emuenv.common_dialog.savedata.slot_id[index], &slot_param);
+    const bool slot_exists = sdslot_read_slot_param(emuenv, emuenv.common_dialog.savedata.slot_id[index], &slot_param, export_name);
     if (!slot_exists) {
         auto empty_param = emuenv.common_dialog.savedata.list_empty_param[index];
         if (empty_param) {
@@ -1106,9 +1106,6 @@ EXPORT(int, sceSaveDataDialogContinue, const SceSaveDataDialogParam *p) {
     emuenv.common_dialog.savedata.display_type = p->dispType == 0 ? emuenv.common_dialog.savedata.display_type : p->dispType;
     emuenv.common_dialog.savedata.userdata = p->userdata;
 
-    std::vector<uint8_t> sdslot_table;
-    sdslot_load_table(emuenv, sdslot_table, export_name); // read sdslot.dat once for all slots below
-
     switch (emuenv.common_dialog.savedata.mode) {
     default:
     case SCE_SAVEDATA_DIALOG_MODE_FIXED:
@@ -1182,7 +1179,7 @@ EXPORT(int, sceSaveDataDialogContinue, const SceSaveDataDialogParam *p) {
             LOG_ERROR("Attempt to continue savedata dialog with unknown mode: {}", log_hex(p->mode));
             break;
         }
-        check_save_file(emuenv.common_dialog.savedata.selected_save, emuenv, sdslot_table, export_name);
+        check_save_file(emuenv.common_dialog.savedata.selected_save, emuenv, export_name);
         break;
     case SCE_SAVEDATA_DIALOG_MODE_LIST:
         emuenv.common_dialog.savedata.mode_to_display = SCE_SAVEDATA_DIALOG_MODE_LIST;
@@ -1194,7 +1191,7 @@ EXPORT(int, sceSaveDataDialogContinue, const SceSaveDataDialogParam *p) {
                 slot_list[i] = list_param->slotList.get(emuenv.mem)[i];
                 emuenv.common_dialog.savedata.slot_id[i] = slot_list[i].id;
                 emuenv.common_dialog.savedata.list_empty_param[i] = slot_list[i].emptyParam.get(emuenv.mem);
-                check_save_file(i, emuenv, sdslot_table, export_name);
+                check_save_file(i, emuenv, export_name);
             }
         }
         break;
@@ -1316,16 +1313,13 @@ EXPORT(int, sceSaveDataDialogInit, const SceSaveDataDialogParam *p) {
     emuenv.common_dialog.savedata.display_type = p->dispType;
     emuenv.common_dialog.savedata.userdata = p->userdata;
 
-    std::vector<uint8_t> sdslot_table;
-    sdslot_load_table(emuenv, sdslot_table, export_name); // read sdslot.dat once for all slots below
-
     switch (p->mode) {
     case SCE_SAVEDATA_DIALOG_MODE_FIXED:
         fixed_param = p->fixedParam.get(emuenv.mem);
         initialize_savedata_vectors(emuenv, 1);
         emuenv.common_dialog.savedata.list_empty_param[0] = fixed_param->targetSlot.emptyParam.get(emuenv.mem);
         emuenv.common_dialog.savedata.slot_id[0] = fixed_param->targetSlot.id;
-        check_save_file(0, emuenv, sdslot_table, export_name);
+        check_save_file(0, emuenv, export_name);
         emuenv.common_dialog.substatus = SCE_COMMON_DIALOG_STATUS_FINISHED;
         break;
     case SCE_SAVEDATA_DIALOG_MODE_LIST:
@@ -1356,7 +1350,7 @@ EXPORT(int, sceSaveDataDialogInit, const SceSaveDataDialogParam *p) {
             slot_list[i] = list_param->slotList.get(emuenv.mem)[i];
             emuenv.common_dialog.savedata.slot_id[i] = slot_list[i].id;
             emuenv.common_dialog.savedata.list_empty_param[i] = slot_list[i].emptyParam.get(emuenv.mem);
-            check_save_file(i, emuenv, sdslot_table, export_name);
+            check_save_file(i, emuenv, export_name);
         }
         break;
     case SCE_SAVEDATA_DIALOG_MODE_USER_MSG:
@@ -1366,7 +1360,7 @@ EXPORT(int, sceSaveDataDialogInit, const SceSaveDataDialogParam *p) {
         emuenv.common_dialog.savedata.mode_to_display = SCE_SAVEDATA_DIALOG_MODE_FIXED;
         emuenv.common_dialog.savedata.msg = reinterpret_cast<const char *>(user_message->msg.get(emuenv.mem));
         emuenv.common_dialog.savedata.list_empty_param[0] = user_message->targetSlot.emptyParam.get(emuenv.mem);
-        check_save_file(0, emuenv, sdslot_table, export_name);
+        check_save_file(0, emuenv, export_name);
 
         handle_user_message(user_message, emuenv);
         break;
@@ -1376,7 +1370,7 @@ EXPORT(int, sceSaveDataDialogInit, const SceSaveDataDialogParam *p) {
         emuenv.common_dialog.savedata.slot_id[0] = sys_message->targetSlot.id;
         emuenv.common_dialog.savedata.mode_to_display = SCE_SAVEDATA_DIALOG_MODE_FIXED;
         emuenv.common_dialog.savedata.list_empty_param[0] = sys_message->targetSlot.emptyParam.get(emuenv.mem);
-        check_save_file(0, emuenv, sdslot_table, export_name);
+        check_save_file(0, emuenv, export_name);
 
         handle_sys_message(sys_message, emuenv);
         break;
@@ -1387,7 +1381,7 @@ EXPORT(int, sceSaveDataDialogInit, const SceSaveDataDialogParam *p) {
         emuenv.common_dialog.savedata.slot_id[0] = progress_bar->targetSlot.id;
         emuenv.common_dialog.savedata.has_progress_bar = true;
         emuenv.common_dialog.savedata.list_empty_param[0] = progress_bar->targetSlot.emptyParam.get(emuenv.mem);
-        check_save_file(0, emuenv, sdslot_table, export_name);
+        check_save_file(0, emuenv, export_name);
 
         if (progress_bar->msg.get(emuenv.mem) != nullptr) {
             emuenv.common_dialog.savedata.msg = reinterpret_cast<const char *>(progress_bar->msg.get(emuenv.mem));
