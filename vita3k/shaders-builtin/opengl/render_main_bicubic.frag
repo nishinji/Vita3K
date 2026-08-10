@@ -5,8 +5,6 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
-#version 410 core
-
 in vec2 uv_frag;
 out vec4 color_frag;
 
@@ -42,10 +40,10 @@ vec4 textureBicubic(sampler2D tex_sampler, vec2 texCoords) {
 
     offset *= invTexSize.xxyy;
 
-    vec4 sample0 = texture2D(tex_sampler, offset.xz);
-    vec4 sample1 = texture2D(tex_sampler, offset.yz);
-    vec4 sample2 = texture2D(tex_sampler, offset.xw);
-    vec4 sample3 = texture2D(tex_sampler, offset.yw);
+    vec4 sample0 = texture(tex_sampler, offset.xz);
+    vec4 sample1 = texture(tex_sampler, offset.yz);
+    vec4 sample2 = texture(tex_sampler, offset.xw);
+    vec4 sample3 = texture(tex_sampler, offset.yw);
 
     float sx = s.x / (s.x + s.y);
     float sy = s.z / (s.z + s.w);

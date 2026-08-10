@@ -9,6 +9,7 @@ add_library(
 	src/gl/renderer.cpp
 	src/gl/ring_buffer.cpp
 	src/gl/overlay_renderer.cpp
+	src/gl/screen_filters.cpp
 	src/gl/screen_render.cpp
 	src/gl/surface_cache.cpp
 	src/gl/sync_state.cpp
