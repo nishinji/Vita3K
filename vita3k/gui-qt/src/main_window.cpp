@@ -1844,12 +1844,7 @@ void MainWindow::setup_status_bar() {
     sb->addWidget(m_accuracy_button);
 
     auto get_filter_names = [this]() -> QStringList {
-        if (emuenv.cfg.current_config.backend_renderer == "Vulkan")
-            return { QStringLiteral("Nearest"), QStringLiteral("Bilinear"),
-                QStringLiteral("Bicubic"), QStringLiteral("FXAA"), QStringLiteral("SMAA"), QStringLiteral("FSR") };
-        else
-            return { QStringLiteral("Nearest"), QStringLiteral("Bilinear"),
-                QStringLiteral("Bicubic"), QStringLiteral("FXAA") };
+        return screen_filter_names(emuenv.renderer.get(), emuenv.cfg.current_config.backend_renderer == "Vulkan");
     };
 
     auto apply_screen_filter = [this](const std::string &filter) {
@@ -2022,11 +2017,8 @@ void MainWindow::update_accuracy_button() {
 
 void MainWindow::update_screen_filter_button() {
     auto &cc = emuenv.cfg.current_config;
-    const QStringList valid = (cc.backend_renderer == "Vulkan")
-        ? QStringList{ QStringLiteral("Nearest"), QStringLiteral("Bilinear"),
-              QStringLiteral("Bicubic"), QStringLiteral("FXAA"), QStringLiteral("SMAA"), QStringLiteral("FSR") }
-        : QStringList{ QStringLiteral("Nearest"), QStringLiteral("Bilinear"),
-              QStringLiteral("Bicubic"), QStringLiteral("FXAA") };
+    // a filter the running GPU cannot set up stays saved, the renderer falls back on its own
+    const QStringList valid = screen_filter_names(nullptr, cc.backend_renderer == "Vulkan");
 
     const QString current = QString::fromStdString(cc.screen_filter);
     if (!valid.contains(current)) {

@@ -22,6 +22,7 @@
 
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QStringList>
 
 #include <memory>
 #include <string>
@@ -31,6 +32,13 @@ struct EmuEnvState;
 class GuiSettings;
 class SettingsDialogTooltips;
 class ThemeManager;
+
+namespace renderer {
+struct State;
+}
+
+// the screen filters to offer for a backend, narrowed to what a renderer running that backend could set up
+QStringList screen_filter_names(renderer::State *running_renderer, bool is_vulkan);
 
 enum class SettingsTab : int {
     Core = 0,

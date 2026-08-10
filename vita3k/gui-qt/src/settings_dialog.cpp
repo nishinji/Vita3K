@@ -1454,6 +1454,29 @@ void SettingsDialog::setup_dirty_tracking() {
         connect(list, &QListWidget::itemChanged, this, [this] { mark_dirty(); });
 }
 
+QStringList screen_filter_names(renderer::State *running_renderer, bool is_vulkan) {
+    static constexpr std::pair<const char *, renderer::Filter> filters[] = {
+        { "Nearest", renderer::Filter::NEAREST },
+        { "Bilinear", renderer::Filter::BILINEAR },
+        { "Bicubic", renderer::Filter::BICUBIC },
+        { "FXAA", renderer::Filter::FXAA },
+        { "SMAA", renderer::Filter::SMAA },
+        { "FSR", renderer::Filter::FSR },
+    };
+
+    // FSR depends on the GPU, only a live renderer of the same backend knows whether it could be set up
+    int supported = ~0;
+    if (running_renderer && (running_renderer->current_backend == renderer::Backend::Vulkan) == is_vulkan)
+        supported = running_renderer->get_supported_filters();
+
+    QStringList names;
+    for (const auto &[name, filter] : filters) {
+        if (supported & static_cast<int>(filter))
+            names << QString::fromLatin1(name);
+    }
+    return names;
+}
+
 void SettingsDialog::update_gpu_visibility() {
     const bool is_vulkan = m_ui->backend_renderer_box->currentText() == QStringLiteral("Vulkan");
 
@@ -1479,13 +1502,7 @@ void SettingsDialog::update_gpu_visibility() {
             : m_ui->screen_filter_box->currentText();
 
         m_ui->screen_filter_box->clear();
-        if (is_vulkan) {
-            m_ui->screen_filter_box->addItems({ QStringLiteral("Nearest"), QStringLiteral("Bilinear"),
-                QStringLiteral("Bicubic"), QStringLiteral("FXAA"), QStringLiteral("SMAA"), QStringLiteral("FSR") });
-        } else {
-            m_ui->screen_filter_box->addItems({ QStringLiteral("Nearest"), QStringLiteral("Bilinear"),
-                QStringLiteral("Bicubic"), QStringLiteral("FXAA") });
-        }
+        m_ui->screen_filter_box->addItems(screen_filter_names(emuenv.renderer.get(), is_vulkan));
 
         const int idx = m_ui->screen_filter_box->findText(previous);
         m_ui->screen_filter_box->setCurrentIndex(idx >= 0 ? idx : 0);
