@@ -15,19 +15,26 @@
 // with this program; if not, write to the Free Software Foundation, Inc.,
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
-#pragma once
+// the FSR library (ffx_a.h + ffx_fsr1.h), the sampler and the load callbacks it
+// expects are pasted in front of this file by ScreenRenderer::init_fsr
 
-#include <glutil/object.h>
-#include <util/fs.h>
+in vec2 uv_frag;
 
-#include <string_view>
+// the size of the upscaled texture, which covers exactly this pass' viewport
+uniform vec2 output_size;
+uniform float sharpening;
 
-namespace gl {
-// the preludes are inserted between the #version line and the shader file, which is
-// where #define and #include-like shared sources have to go.
-// version_override replaces the default #version line (and the precision statements that
-// follow it on GLES) for the shaders that need a newer language version
-UniqueGLObject load_shaders(const fs::path &vertex_file_path, const fs::path &fragment_file_path,
-    std::string_view vertex_prelude = "", std::string_view fragment_prelude = "",
-    std::string_view version_override = "");
-} // namespace gl
+out vec4 color_frag;
+
+void main() {
+	AU4 con;
+	FsrRcasCon(con, sharpening);
+
+	// the upscaled texture has the same orientation as this viewport, and the sharpening
+	// kernel is symmetric, so no mirroring is needed here
+	AU2 pos = AU2(uv_frag * output_size);
+
+	AF3 color;
+	FsrRcasF(color.r, color.g, color.b, pos, con);
+	color_frag = vec4(color, 1.0);
+}

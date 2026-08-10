@@ -794,19 +794,16 @@ std::vector<uint32_t> GLState::dump_frame(DisplayState &display, uint32_t &width
 }
 
 int GLState::get_supported_filters() {
-    return static_cast<int>(Filter::NEAREST) | static_cast<int>(Filter::BILINEAR)
-        | static_cast<int>(Filter::BICUBIC) | static_cast<int>(Filter::FXAA);
+    int filters = static_cast<int>(Filter::NEAREST) | static_cast<int>(Filter::BILINEAR)
+        | static_cast<int>(Filter::BICUBIC) | static_cast<int>(Filter::FXAA) | static_cast<int>(Filter::SMAA);
+    if (screen_renderer.is_fsr_available())
+        filters |= static_cast<int>(Filter::FSR);
+    return filters;
 }
 
 void GLState::set_screen_filter(const std::string_view &filter) {
-    if (filter == "Nearest")
-        screen_renderer.filter = ScreenRenderer::Filter::Nearest;
-    else if (filter == "FXAA")
-        screen_renderer.filter = ScreenRenderer::Filter::FXAA;
-    else if (filter == "Bicubic")
-        screen_renderer.filter = ScreenRenderer::Filter::Bicubic;
-    else
-        screen_renderer.filter = ScreenRenderer::Filter::Bilinear;
+    // anything we do not handle falls back to bilinear
+    screen_renderer.set_filter(filter);
 }
 
 int GLState::get_max_anisotropic_filtering() {

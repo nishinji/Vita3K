@@ -1484,7 +1484,7 @@ void SettingsDialog::update_gpu_visibility() {
                 QStringLiteral("Bicubic"), QStringLiteral("FXAA"), QStringLiteral("SMAA"), QStringLiteral("FSR") });
         } else {
             m_ui->screen_filter_box->addItems({ QStringLiteral("Nearest"), QStringLiteral("Bilinear"),
-                QStringLiteral("Bicubic"), QStringLiteral("FXAA") });
+                QStringLiteral("Bicubic"), QStringLiteral("FXAA"), QStringLiteral("SMAA"), QStringLiteral("FSR") });
         }
 
         const int idx = m_ui->screen_filter_box->findText(previous);
