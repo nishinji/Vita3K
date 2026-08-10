@@ -579,14 +579,29 @@ GLuint GLSurfaceCache::retrieve_depth_stencil_texture_handle(const State &state,
 
         GLDepthStencilSurfaceCacheInfo &cached_info = depth_stencil_textures[found_index];
         bool need_remake = false;
-        if (cached_info.width < force_width) {
-            cached_info.width = force_width;
-            need_remake = true;
-        }
+        if (is_reading) {
+            // A read must never resize the surface: glTexImage2D discards the contents,
+            // so growing here throws away the very depth that is about to be sampled,
+            // and leaves the depth attachment larger than the colour surface it is paired
+            // with, so later scenes only fill a corner of it.
+            //
+            // The guest addresses a multisampled depth surface at sample resolution -
+            // twice the pixel resolution in each direction for 4x - which is not what is
+            // rendered here, so such a read cannot be served from this surface at all.
+            // Decline it and let the texture cache handle the texture, which is what the
+            // Vulkan backend does when the requested extent does not match the cache.
+            if (cached_info.width < force_width || cached_info.height < force_height)
+                return 0;
+        } else {
+            if (cached_info.width < force_width) {
+                cached_info.width = force_width;
+                need_remake = true;
+            }
 
-        if (cached_info.height < force_height) {
-            cached_info.height = force_height;
-            need_remake = true;
+            if (cached_info.height < force_height) {
+                cached_info.height = force_height;
+                need_remake = true;
+            }
         }
 
         if (need_remake) {
