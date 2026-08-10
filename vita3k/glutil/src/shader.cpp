@@ -33,18 +33,20 @@
  * \param fragment_file_path File path of the fragment shader
  * \param vertex_prelude Source inserted before the vertex shader file (defines, shared code)
  * \param fragment_prelude Source inserted before the fragment shader file (defines, shared code)
+ * \param version_override Replaces the default #version line when the shader needs a newer one
  * \return SharedGLObject that holds the resulting program id. Empty if loading was unsuccessful
  */
 UniqueGLObject gl::load_shaders(const fs::path &vertex_file_path, const fs::path &fragment_file_path,
-    std::string_view vertex_prelude, std::string_view fragment_prelude) {
+    std::string_view vertex_prelude, std::string_view fragment_prelude, std::string_view version_override) {
     GLuint vs = glCreateShader(GL_VERTEX_SHADER);
     GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
 
 #ifdef ANDROID
-    const std::string gl_version = "#version 300 es\nprecision highp float;\n";
+    const std::string_view default_version = "#version 300 es\nprecision highp float;\n";
 #else
-    const std::string gl_version = "#version 410 core\n";
+    const std::string_view default_version = "#version 410 core\n";
 #endif
+    const std::string gl_version{ version_override.empty() ? default_version : version_override };
 
     // Read the vertex/fragment shader code from files
     std::vector<char> vs_code;

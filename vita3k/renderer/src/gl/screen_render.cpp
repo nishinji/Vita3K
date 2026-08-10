@@ -15,14 +15,8 @@
 // with this program; if not, write to the Free Software Foundation, Inc.,
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
-#include <glutil/shader.h>
-#include <renderer/AreaTex.h>
-#include <renderer/SearchTex.h>
 #include <renderer/gl/screen_render.h>
 #include <util/log.h>
-
-#include <string>
-#include <vector>
 
 namespace renderer::gl {
 
@@ -56,21 +50,16 @@ void ScreenRenderer::setup_vertex_attributes(GLuint program) {
 bool ScreenRenderer::init(const fs::path &static_assets) {
     glGenTextures(1, &m_screen_texture);
 
-    const auto builtin_shaders_path = static_assets / "shaders-builtin/opengl";
-
-    const auto render_main_path_vert = builtin_shaders_path / "render_main.vert";
-    const auto render_main_path_frag = builtin_shaders_path / "render_main.frag";
-    const auto render_main_path_fxaa_frag = builtin_shaders_path / "render_main_fxaa.frag";
-
-    m_render_shader_nofilter = ::gl::load_shaders(render_main_path_vert, render_main_path_frag);
-    m_render_shader_fxaa = ::gl::load_shaders(render_main_path_vert, render_main_path_fxaa_frag);
-    if (!m_render_shader_nofilter || !m_render_shader_fxaa) {
+    m_nearest_filter = std::make_unique<NearestScreenFilter>(*this);
+    m_bilinear_filter = std::make_unique<BilinearScreenFilter>(*this);
+    m_bicubic_filter = std::make_unique<BicubicScreenFilter>(*this);
+    m_fxaa_filter = std::make_unique<FXAAScreenFilter>(*this);
+    if (!m_nearest_filter->init(static_assets) || !m_bilinear_filter->init(static_assets)
+        || !m_bicubic_filter->init(static_assets) || !m_fxaa_filter->init(static_assets)) {
         LOG_CRITICAL("Couldn't compile essential shaders for rendering. Exiting");
         return false;
     }
-
-    // SMAA is optional, the filter simply stays unavailable if it could not be set up
-    init_smaa(static_assets);
+    m_filter = m_bilinear_filter.get();
 
     glGenVertexArrays(1, &m_vao);
     glBindVertexArray(m_vao);
@@ -86,93 +75,8 @@ bool ScreenRenderer::init(const fs::path &static_assets) {
     glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_buffer_data), vertex_buffer_data, GL_DYNAMIC_DRAW);
 
-    setup_vertex_attributes(*m_render_shader_nofilter);
-
-    glClearColor(32.0f / 255.0f, 178.0f / 255.0f, 170.0f / 255.0f, 1.0f);
-    glClearDepthf(1.0f);
-
-    return true;
-}
-
-void ScreenRenderer::set_filter(ScreenFilter new_filter) {
-    if (new_filter == ScreenFilter::SMAA && !m_smaa_shader_neighborhood) {
-        LOG_WARN("SMAA is not available, falling back to no filter");
-        new_filter = ScreenFilter::NONE;
-    }
-    m_filter = new_filter;
-}
-
-bool ScreenRenderer::init_smaa(const fs::path &static_assets) {
-    const auto builtin_shaders_path = static_assets / "shaders-builtin/opengl";
-
-    // the SMAA library is a single header shared with the vulkan backend, it is pasted
-    // in front of each shader (along with its configuration) instead of being #included
-    std::vector<char> smaa_library;
-    if (!fs_utils::read_data(static_assets / "shaders-builtin/SMAA.hlsl", smaa_library)) {
-        LOG_ERROR("Couldn't open SMAA.hlsl, SMAA will not be available");
-        return false;
-    }
-
-    // SMAA_GLSL_3 only needs GLSL 1.30 features, so the same code works on GLES 3.0
-    const std::string config = "#define SMAA_GLSL_3 1\n"
-                               "#define SMAA_PRESET_HIGH 1\n"
-                               "uniform vec4 rt_metrics;\n"
-                               "#define SMAA_RT_METRICS rt_metrics\n";
-    // the pixel shaders use discard, which is not allowed in a vertex shader
-    const std::string vertex_prelude = config + "#define SMAA_INCLUDE_PS 0\n" + std::string(smaa_library.data(), smaa_library.size());
-    const std::string fragment_prelude = config + "#define SMAA_INCLUDE_VS 0\n" + std::string(smaa_library.data(), smaa_library.size());
-
-    m_smaa_shader_edge = ::gl::load_shaders(builtin_shaders_path / "smaa_edge.vert",
-        builtin_shaders_path / "smaa_edge.frag", vertex_prelude, fragment_prelude);
-    m_smaa_shader_blend = ::gl::load_shaders(builtin_shaders_path / "smaa_blend.vert",
-        builtin_shaders_path / "smaa_blend.frag", vertex_prelude, fragment_prelude);
-    m_smaa_shader_neighborhood = ::gl::load_shaders(builtin_shaders_path / "smaa_neighborhood.vert",
-        builtin_shaders_path / "smaa_neighborhood.frag", vertex_prelude, fragment_prelude);
-
-    if (!m_smaa_shader_edge || !m_smaa_shader_blend || !m_smaa_shader_neighborhood) {
-        LOG_ERROR("Couldn't compile the SMAA shaders, SMAA will not be available");
-        m_smaa_shader_edge.reset();
-        m_smaa_shader_blend.reset();
-        m_smaa_shader_neighborhood.reset();
-        return false;
-    }
-
-    // bind each sampler to the texture unit it is given in render_smaa_offscreen / render
-    glUseProgram(*m_smaa_shader_blend);
-    glUniform1i(glGetUniformLocation(*m_smaa_shader_blend, "edges_tex"), 0);
-    glUniform1i(glGetUniformLocation(*m_smaa_shader_blend, "area_tex"), 1);
-    glUniform1i(glGetUniformLocation(*m_smaa_shader_blend, "search_tex"), 2);
-    glUseProgram(*m_smaa_shader_neighborhood);
-    glUniform1i(glGetUniformLocation(*m_smaa_shader_neighborhood, "fb"), 0);
-    glUniform1i(glGetUniformLocation(*m_smaa_shader_neighborhood, "blend_tex"), 1);
-    glUseProgram(0);
-
-    // upload the two precomputed lookup tables
-    // their rows are not always a multiple of 4 bytes (the search texture is 66 wide)
-    GLint last_unpack_alignment;
-    glGetIntegerv(GL_UNPACK_ALIGNMENT, &last_unpack_alignment);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-
-    const auto upload_lut = [](GLuint &texture, GLenum internal_format, GLenum format,
-                                GLsizei width, GLsizei height, const void *data, GLint filter) {
-        glGenTextures(1, &texture);
-        glBindTexture(GL_TEXTURE_2D, texture);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
-        glTexImage2D(GL_TEXTURE_2D, 0, internal_format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
-    };
-
-    upload_lut(m_smaa_area_texture, GL_RG8, GL_RG, AREATEX_WIDTH, AREATEX_HEIGHT, areaTexBytes, GL_LINEAR);
-    upload_lut(m_smaa_search_texture, GL_R8, GL_RED, SEARCHTEX_WIDTH, SEARCHTEX_HEIGHT, searchTexBytes, GL_NEAREST);
-
-    glPixelStorei(GL_UNPACK_ALIGNMENT, last_unpack_alignment);
-    glBindTexture(GL_TEXTURE_2D, 0);
-
-    // the offscreen passes always cover the whole source texture, so unlike the screen
-    // quad their uvs never change
+    // the offscreen passes always cover a whole target, so unlike the screen quad their
+    // uvs never change
     static const screen_vertices_t offscreen_vertices = {
         { { -1.f, -1.f, 0.0f }, { 0.f, 0.f } },
         { { 1.f, -1.f, 0.0f }, { 1.f, 0.f } },
@@ -180,92 +84,101 @@ bool ScreenRenderer::init_smaa(const fs::path &static_assets) {
         { { -1.f, 1.f, 0.0f }, { 0.f, 1.f } }
     };
 
-    glGenVertexArrays(1, &m_smaa_vao);
-    glBindVertexArray(m_smaa_vao);
-    glGenBuffers(1, &m_smaa_vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, m_smaa_vbo);
+    glGenVertexArrays(1, &m_offscreen_vao);
+    glBindVertexArray(m_offscreen_vao);
+    glGenBuffers(1, &m_offscreen_vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, m_offscreen_vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(offscreen_vertices), offscreen_vertices, GL_STATIC_DRAW);
     glBindVertexArray(0);
 
-    glGenFramebuffers(1, &m_smaa_edges_fbo);
-    glGenFramebuffers(1, &m_smaa_blend_fbo);
-    glGenTextures(1, &m_smaa_edges_texture);
-    glGenTextures(1, &m_smaa_blend_texture);
+    // SMAA and FSR are optional, they simply stay unavailable if they could not be set up
+    m_smaa_filter = std::make_unique<SMAAScreenFilter>(*this);
+    if (!m_smaa_filter->init(static_assets))
+        m_smaa_filter.reset();
+
+    m_fsr_filter = std::make_unique<FSRScreenFilter>(*this);
+    if (!m_fsr_filter->init(static_assets))
+        m_fsr_filter.reset();
+
+    glClearColor(32.0f / 255.0f, 178.0f / 255.0f, 170.0f / 255.0f, 1.0f);
+    glClearDepthf(1.0f);
 
     return true;
 }
 
-void ScreenRenderer::resize_smaa_targets(GLsizei width, GLsizei height) {
-    if (width == m_smaa_width && height == m_smaa_height)
-        return;
+void ScreenRenderer::set_filter(const std::string_view &filter) {
+    ScreenFilter *wanted = m_bilinear_filter.get();
+    if (filter == "Nearest")
+        wanted = m_nearest_filter.get();
+    else if (filter == "Bicubic")
+        wanted = m_bicubic_filter.get();
+    else if (filter == "FXAA")
+        wanted = m_fxaa_filter.get();
+    else if (filter == "SMAA")
+        wanted = m_smaa_filter.get();
+    else if (filter == "FSR")
+        wanted = m_fsr_filter.get();
 
-    const auto attach = [&](GLuint fbo, GLuint texture) {
-        glBindTexture(GL_TEXTURE_2D, texture);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    if (!wanted) {
+        LOG_WARN("{} is not available, falling back to bilinear", filter);
+        wanted = m_bilinear_filter.get();
+    }
 
-        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
-        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-            LOG_ERROR("Incomplete SMAA framebuffer ({}x{})", width, height);
-    };
-
-    attach(m_smaa_edges_fbo, m_smaa_edges_texture);
-    attach(m_smaa_blend_fbo, m_smaa_blend_texture);
-    glBindTexture(GL_TEXTURE_2D, 0);
-
-    m_smaa_width = width;
-    m_smaa_height = height;
+    m_filter = wanted;
 }
 
-void ScreenRenderer::render_smaa_offscreen(GLuint texture, const SceFVector2 &texture_size) {
-    const auto width = static_cast<GLsizei>(texture_size.x);
-    const auto height = static_cast<GLsizei>(texture_size.y);
-    resize_smaa_targets(width, height);
+void ScreenRenderer::bind_screen_quad(const float *uvs) {
+    glBindVertexArray(m_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
 
-    glViewport(0, 0, width, height);
-    glBindVertexArray(m_smaa_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, m_smaa_vbo);
+    if ((uvs[0] == last_uvs[0]) && (uvs[1] == last_uvs[1]) && (uvs[2] == last_uvs[2]) && (uvs[3] == last_uvs[3]))
+        return;
 
-    const auto run_pass = [&](GLuint fbo, GLuint program) {
-        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-        glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
-        glUseProgram(program);
-        glUniform4f(glGetUniformLocation(program, "rt_metrics"),
-            1.0f / texture_size.x, 1.0f / texture_size.y, texture_size.x, texture_size.y);
-        setup_vertex_attributes(program);
-        glDrawArrays(GL_TRIANGLE_FAN, 0, screen_vertex_count);
+    // Reupload the data again
+    screen_vertices_t vertex_buffer_data = {
+        { { -1.f, -1.f, 0.0f }, { 0.f, 1.f } },
+        { { 1.f, -1.f, 0.0f }, { 1.f, 1.f } },
+        { { 1.f, 1.f, 0.0f }, { 1.f, 0.f } },
+        { { -1.f, 1.f, 0.0f }, { 0.f, 0.f } }
     };
 
-    // the lookup tables carry their own filtering (linear for the area one, point for
-    // the search one), a leftover sampler object would override it
-    glBindSampler(0, 0);
-    glBindSampler(1, 0);
-    glBindSampler(2, 0);
+    vertex_buffer_data[0].uv[0] = uvs[0];
+    vertex_buffer_data[0].uv[1] = uvs[3];
 
-    // pass 1: edge detection, reads the source color
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, texture);
-    run_pass(m_smaa_edges_fbo, *m_smaa_shader_edge);
+    vertex_buffer_data[1].uv[0] = uvs[2];
+    vertex_buffer_data[1].uv[1] = uvs[3];
 
-    // pass 2: blending weight calculation, reads the edges and both lookup tables
-    glBindTexture(GL_TEXTURE_2D, m_smaa_edges_texture);
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, m_smaa_area_texture);
-    glActiveTexture(GL_TEXTURE2);
-    glBindTexture(GL_TEXTURE_2D, m_smaa_search_texture);
-    run_pass(m_smaa_blend_fbo, *m_smaa_shader_blend);
+    vertex_buffer_data[2].uv[0] = uvs[2];
+    vertex_buffer_data[2].uv[1] = uvs[1];
 
-    // leave the lookup tables behind, pass 3 needs unit 1 for the blend texture
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glActiveTexture(GL_TEXTURE0);
+    vertex_buffer_data[3].uv[0] = uvs[0];
+    vertex_buffer_data[3].uv[1] = uvs[1];
+
+    last_uvs[0] = uvs[0];
+    last_uvs[1] = uvs[1];
+    last_uvs[2] = uvs[2];
+    last_uvs[3] = uvs[3];
+
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_buffer_data), nullptr, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_buffer_data), vertex_buffer_data, GL_DYNAMIC_DRAW);
+}
+
+void ScreenRenderer::bind_offscreen_quad() {
+    glBindVertexArray(m_offscreen_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_offscreen_vbo);
+}
+
+void ScreenRenderer::begin_screen_pass(const SceFVector2 &viewport_pos, const SceFVector2 &viewport_size, GLuint default_fbo) {
+    glBindFramebuffer(GL_FRAMEBUFFER, default_fbo);
+
+    glViewport(static_cast<GLint>(viewport_pos.x), static_cast<GLint>(viewport_pos.y), static_cast<GLsizei>(viewport_size.x),
+        static_cast<GLsizei>(viewport_size.y));
+
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClearDepthf(1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    // should not be needed, but just in case
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 }
 
 void ScreenRenderer::render(const SceFVector2 &viewport_pos, const SceFVector2 &viewport_size, const float *uvs, const GLuint texture, const SceFVector2 texture_size, GLuint default_fbo) {
@@ -310,106 +223,9 @@ void ScreenRenderer::render(const SceFVector2 &viewport_pos, const SceFVector2 &
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 #endif
 
-    // the first two SMAA passes render the whole source into offscreen targets, the last
-    // one is the screen pass below
-    if (m_filter == ScreenFilter::SMAA)
-        render_smaa_offscreen(texture, texture_size);
+    static const float default_uv[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
 
-    glBindFramebuffer(GL_FRAMEBUFFER, default_fbo);
-
-    glViewport(static_cast<GLint>(viewport_pos.x), static_cast<GLint>(viewport_pos.y), static_cast<GLsizei>(viewport_size.x),
-        static_cast<GLsizei>(viewport_size.y));
-
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClearDepthf(1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    // should not be needed, but just in case
-    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-
-    const SharedGLObject *shader = &m_render_shader_nofilter;
-    switch (m_filter) {
-    case ScreenFilter::FXAA:
-        shader = &m_render_shader_fxaa;
-        break;
-    case ScreenFilter::SMAA:
-        shader = &m_smaa_shader_neighborhood;
-        break;
-    default:
-        break;
-    }
-
-    glUseProgram(**shader);
-    glBindVertexArray(m_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-
-    const float default_uv[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
-
-    if (!uvs) {
-        uvs = default_uv;
-    }
-
-    if ((uvs[0] != last_uvs[0]) || (uvs[1] != last_uvs[1]) || (uvs[2] != last_uvs[2]) || (uvs[3] != last_uvs[3])) {
-        // Reupload the data again
-        screen_vertices_t vertex_buffer_data = {
-            { { -1.f, -1.f, 0.0f }, { 0.f, 1.f } },
-            { { 1.f, -1.f, 0.0f }, { 1.f, 1.f } },
-            { { 1.f, 1.f, 0.0f }, { 1.f, 0.f } },
-            { { -1.f, 1.f, 0.0f }, { 0.f, 0.f } }
-        };
-
-        vertex_buffer_data[0].uv[0] = uvs[0];
-        vertex_buffer_data[0].uv[1] = uvs[3];
-
-        vertex_buffer_data[1].uv[0] = uvs[2];
-        vertex_buffer_data[1].uv[1] = uvs[3];
-
-        vertex_buffer_data[2].uv[0] = uvs[2];
-        vertex_buffer_data[2].uv[1] = uvs[1];
-
-        vertex_buffer_data[3].uv[0] = uvs[0];
-        vertex_buffer_data[3].uv[1] = uvs[1];
-
-        last_uvs[0] = uvs[0];
-        last_uvs[1] = uvs[1];
-        last_uvs[2] = uvs[2];
-        last_uvs[3] = uvs[3];
-
-        glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_buffer_data), nullptr, GL_DYNAMIC_DRAW);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_buffer_data), vertex_buffer_data, GL_DYNAMIC_DRAW);
-    }
-
-    setup_vertex_attributes(**shader);
-
-    switch (m_filter) {
-    case ScreenFilter::FXAA: {
-        const GLint inv_screen_location = glGetUniformLocation(**shader, "inv_frame_size");
-        glUniform2f(inv_screen_location, 1 / texture_size.x, 1 / texture_size.y);
-        break;
-    }
-    case ScreenFilter::SMAA: {
-        const GLint rt_metrics_location = glGetUniformLocation(**shader, "rt_metrics");
-        glUniform4f(rt_metrics_location, 1 / texture_size.x, 1 / texture_size.y, texture_size.x, texture_size.y);
-        // the blending weights computed by the offscreen passes cover the whole source,
-        // so they are addressed with the same uvs as the color texture
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, m_smaa_blend_texture);
-        glActiveTexture(GL_TEXTURE0);
-        break;
-    }
-    default:
-        break;
-    }
-
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
-
-    if (m_filter == ScreenFilter::SMAA) {
-        // only unit 0 is saved and restored below
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, 0);
-        glActiveTexture(GL_TEXTURE0);
-    }
+    m_filter->render(texture, texture_size, uvs ? uvs : default_uv, viewport_pos, viewport_size, default_fbo);
 
     // Restore modified GL state
     glUseProgram(last_program);
@@ -444,43 +260,33 @@ void ScreenRenderer::render(const SceFVector2 &viewport_pos, const SceFVector2 &
 }
 
 void ScreenRenderer::destroy() {
+    m_filter = nullptr;
+    for (ScreenFilter *filter : { m_nearest_filter.get(), m_bilinear_filter.get(), m_bicubic_filter.get(),
+             m_fxaa_filter.get(), m_smaa_filter.get(), m_fsr_filter.get() }) {
+        if (filter)
+            filter->destroy();
+    }
+    m_nearest_filter.reset();
+    m_bilinear_filter.reset();
+    m_bicubic_filter.reset();
+    m_fxaa_filter.reset();
+    m_smaa_filter.reset();
+    m_fsr_filter.reset();
+
     glDeleteBuffers(1, &m_vbo);
     m_vbo = 0;
 
     glDeleteVertexArrays(1, &m_vao);
     m_vao = 0;
 
+    glDeleteBuffers(1, &m_offscreen_vbo);
+    m_offscreen_vbo = 0;
+
+    glDeleteVertexArrays(1, &m_offscreen_vao);
+    m_offscreen_vao = 0;
+
     glDeleteTextures(1, &m_screen_texture);
     m_screen_texture = 0;
-
-    m_render_shader_nofilter.reset();
-    m_render_shader_fxaa.reset();
-
-    glDeleteFramebuffers(1, &m_smaa_edges_fbo);
-    glDeleteFramebuffers(1, &m_smaa_blend_fbo);
-    m_smaa_edges_fbo = 0;
-    m_smaa_blend_fbo = 0;
-
-    glDeleteTextures(1, &m_smaa_edges_texture);
-    glDeleteTextures(1, &m_smaa_blend_texture);
-    glDeleteTextures(1, &m_smaa_area_texture);
-    glDeleteTextures(1, &m_smaa_search_texture);
-    m_smaa_edges_texture = 0;
-    m_smaa_blend_texture = 0;
-    m_smaa_area_texture = 0;
-    m_smaa_search_texture = 0;
-
-    glDeleteBuffers(1, &m_smaa_vbo);
-    m_smaa_vbo = 0;
-    glDeleteVertexArrays(1, &m_smaa_vao);
-    m_smaa_vao = 0;
-
-    m_smaa_width = 0;
-    m_smaa_height = 0;
-
-    m_smaa_shader_edge.reset();
-    m_smaa_shader_blend.reset();
-    m_smaa_shader_neighborhood.reset();
 }
 
 ScreenRenderer::~ScreenRenderer() {

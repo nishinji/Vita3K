@@ -284,7 +284,8 @@ if(APPLE)
 		POST_BUILD
 		COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/../data" "$<TARGET_FILE_DIR:vita3k>/../Resources/data"
 		COMMAND ${CMAKE_COMMAND} -E copy_directory "${VITA3K_QT_QM_DIR}" "$<TARGET_FILE_DIR:vita3k>/../Resources/translations"
-		COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/shaders-builtin/" "$<TARGET_FILE_DIR:vita3k>/../Resources/shaders-builtin")
+		COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/shaders-builtin/" "$<TARGET_FILE_DIR:vita3k>/../Resources/shaders-builtin"
+		COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/external/GPUOpen" "$<TARGET_FILE_DIR:vita3k>/../Resources/shaders-builtin/GPUOpen")
 	if(USE_DISCORD_RICH_PRESENCE)
 		if(ARCHITECTURE STREQUAL "x86_64")
 			set(discord_dylib "${CMAKE_BINARY_DIR}/external/discord_game_sdk/lib/x86_64/discord_game_sdk.dylib")
@@ -334,6 +335,7 @@ elseif(LINUX)
 			COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/data" "${APPDIR}/usr/share/${VITA3K_APP_NAME}/"
 			COMMAND ${CMAKE_COMMAND} -E copy_directory "${VITA3K_QT_QM_DIR}" "${APPDIR}/usr/share/${VITA3K_APP_NAME}/translations"
 			COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/shaders-builtin" "${APPDIR}/usr/share/${VITA3K_APP_NAME}/shaders-builtin"
+			COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/external/GPUOpen" "${APPDIR}/usr/share/${VITA3K_APP_NAME}/shaders-builtin/GPUOpen"
 			COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/icons" "${APPDIR}/usr/share/VITA3K_APP_NAME/icons"
 			COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/COPYING.txt" "${APPDIR}/usr/share/licenses/${VITA3K_APP_NAME}/"
 			COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/README.md" "${APPDIR}/usr/share/doc/${VITA3K_APP_NAME}/"
@@ -364,6 +366,10 @@ elseif(LINUX)
 			${CMAKE_CURRENT_SOURCE_DIR}/icons
 			${CMAKE_SOURCE_DIR}/data
 			DESTINATION "${CMAKE_INSTALL_DATADIR}/Vita3K/")
+		# the FSR library is pasted into the opengl shaders at runtime
+		install(DIRECTORY
+			${CMAKE_SOURCE_DIR}/external/GPUOpen
+			DESTINATION "${CMAKE_INSTALL_DATADIR}/Vita3K/shaders-builtin/")
 		install(FILES
 			${VITA3K_QT_QM_FILES}
 			DESTINATION "${CMAKE_INSTALL_DATADIR}/Vita3K/translations/")
@@ -401,6 +407,7 @@ elseif(LINUX)
 		COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/data" "$<TARGET_FILE_DIR:vita3k>/data"
 		COMMAND ${CMAKE_COMMAND} -E copy_directory "${VITA3K_QT_QM_DIR}" "$<TARGET_FILE_DIR:vita3k>/translations"
 		COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/shaders-builtin" "$<TARGET_FILE_DIR:vita3k>/shaders-builtin"
+		COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/external/GPUOpen" "$<TARGET_FILE_DIR:vita3k>/shaders-builtin/GPUOpen"
 		COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/icons" "$<TARGET_FILE_DIR:vita3k>/icons"
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/COPYING.txt" "$<TARGET_FILE_DIR:vita3k>/COPYING.txt"
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/README.md" "$<TARGET_FILE_DIR:vita3k>/README.md"
@@ -424,6 +431,7 @@ elseif(WIN32)
 		COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/../data" "$<TARGET_FILE_DIR:vita3k>/data"
 		COMMAND ${CMAKE_COMMAND} -E copy_directory "${VITA3K_QT_QM_DIR}" "$<TARGET_FILE_DIR:vita3k>/translations"
 		COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/shaders-builtin" "$<TARGET_FILE_DIR:vita3k>/shaders-builtin"
+		COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/external/GPUOpen" "$<TARGET_FILE_DIR:vita3k>/shaders-builtin/GPUOpen"
 		COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/icons" "$<TARGET_FILE_DIR:vita3k>/icons"
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/COPYING.txt" "$<TARGET_FILE_DIR:vita3k>/COPYING.txt"
 	)
@@ -454,6 +462,7 @@ elseif(ANDROID)
 		POST_BUILD
 		COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/../data" "${CMAKE_CURRENT_SOURCE_DIR}/../android/app/assets/data"
 		COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/shaders-builtin" "${CMAKE_CURRENT_SOURCE_DIR}/../android/app/assets/shaders-builtin"
+		COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/external/GPUOpen" "${CMAKE_CURRENT_SOURCE_DIR}/../android/app/assets/shaders-builtin/GPUOpen"
 		COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/icons" "${CMAKE_CURRENT_SOURCE_DIR}/../android/app/assets/icons"
 	)
 endif()
