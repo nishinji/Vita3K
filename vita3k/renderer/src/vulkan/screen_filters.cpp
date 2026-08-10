@@ -345,9 +345,11 @@ std::string_view BicubicScreenFilter::get_fragment_name() {
 }
 
 vk::Sampler BicubicScreenFilter::create_sampler() {
+    // the shader builds its result out of four bilinear taps placed between texels, so
+    // the hardware filtering has to be linear for the cubic weighting to work
     vk::SamplerCreateInfo sampler_info{
-        .magFilter = vk::Filter::eNearest,
-        .minFilter = vk::Filter::eNearest,
+        .magFilter = vk::Filter::eLinear,
+        .minFilter = vk::Filter::eLinear,
         .addressModeU = vk::SamplerAddressMode::eClampToEdge,
         .addressModeV = vk::SamplerAddressMode::eClampToEdge,
         .addressModeW = vk::SamplerAddressMode::eClampToEdge,

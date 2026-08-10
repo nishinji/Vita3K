@@ -15,53 +15,51 @@
 // with this program; if not, write to the Free Software Foundation, Inc.,
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
-#include <glutil/shader.h>
 #include <renderer/gl/screen_render.h>
 #include <util/log.h>
 
 namespace renderer::gl {
 
-const SharedGLObject &ScreenRenderer::current_shader() const {
-    switch (filter) {
-    case Filter::FXAA: return m_render_shader_fxaa;
-    case Filter::Bicubic: return m_render_shader_bicubic;
-    default: return m_render_shader_nofilter; // Bilinear / Nearest
-    }
-}
+void ScreenRenderer::setup_vertex_attributes(GLuint program) {
+    const GLint pos_attrib = glGetAttribLocation(program, "position_vertex");
+    const GLint uv_attrib = glGetAttribLocation(program, "uv_vertex");
 
-GLuint ScreenRenderer::current_sampler() const {
-    return (filter == Filter::Nearest) ? m_sampler_nearest : m_sampler_linear;
+    // 1st attribute: positions
+    glVertexAttribPointer(
+        pos_attrib, // attribute index
+        3, // size
+        GL_FLOAT, // type
+        GL_FALSE, // normalized?
+        screen_vertex_size, // stride
+        reinterpret_cast<void *>(0) // array buffer offset
+    );
+    glEnableVertexAttribArray(pos_attrib);
+
+    // 2nd attribute: uvs
+    glVertexAttribPointer(
+        uv_attrib, // attribute index
+        2, // size
+        GL_FLOAT, // type
+        GL_FALSE, // normalized?
+        screen_vertex_size, // stride
+        reinterpret_cast<void *>(3 * sizeof(GLfloat)) // array buffer offset
+    );
+    glEnableVertexAttribArray(uv_attrib);
 }
 
 bool ScreenRenderer::init(const fs::path &static_assets) {
     glGenTextures(1, &m_screen_texture);
 
-    const auto builtin_shaders_path = static_assets / "shaders-builtin/opengl";
-
-    const auto render_main_path_vert = builtin_shaders_path / "render_main.vert";
-    const auto render_main_path_frag = builtin_shaders_path / "render_main.frag";
-    const auto render_main_path_fxaa_frag = builtin_shaders_path / "render_main_fxaa.frag";
-    const auto render_main_path_bicubic_frag = builtin_shaders_path / "render_main_bicubic.frag";
-
-    m_render_shader_nofilter = ::gl::load_shaders(render_main_path_vert, render_main_path_frag);
-    m_render_shader_fxaa = ::gl::load_shaders(render_main_path_vert, render_main_path_fxaa_frag);
-    m_render_shader_bicubic = ::gl::load_shaders(render_main_path_vert, render_main_path_bicubic_frag);
-    if (!m_render_shader_nofilter || !m_render_shader_fxaa || !m_render_shader_bicubic) {
+    m_nearest_filter = std::make_unique<NearestScreenFilter>(*this);
+    m_bilinear_filter = std::make_unique<BilinearScreenFilter>(*this);
+    m_bicubic_filter = std::make_unique<BicubicScreenFilter>(*this);
+    m_fxaa_filter = std::make_unique<FXAAScreenFilter>(*this);
+    if (!m_nearest_filter->init(static_assets) || !m_bilinear_filter->init(static_assets)
+        || !m_bicubic_filter->init(static_assets) || !m_fxaa_filter->init(static_assets)) {
         LOG_CRITICAL("Couldn't compile essential shaders for rendering. Exiting");
         return false;
     }
-
-    glGenSamplers(1, &m_sampler_linear);
-    glSamplerParameteri(m_sampler_linear, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glSamplerParameteri(m_sampler_linear, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glSamplerParameteri(m_sampler_linear, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glSamplerParameteri(m_sampler_linear, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    glGenSamplers(1, &m_sampler_nearest);
-    glSamplerParameteri(m_sampler_nearest, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glSamplerParameteri(m_sampler_nearest, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glSamplerParameteri(m_sampler_nearest, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glSamplerParameteri(m_sampler_nearest, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    m_filter = m_bilinear_filter.get();
 
     glGenVertexArrays(1, &m_vao);
     glBindVertexArray(m_vao);
@@ -77,37 +75,110 @@ bool ScreenRenderer::init(const fs::path &static_assets) {
     glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_buffer_data), vertex_buffer_data, GL_DYNAMIC_DRAW);
 
-    const auto &shader = current_shader();
+    // the offscreen passes always cover a whole target, so unlike the screen quad their
+    // uvs never change
+    static const screen_vertices_t offscreen_vertices = {
+        { { -1.f, -1.f, 0.0f }, { 0.f, 0.f } },
+        { { 1.f, -1.f, 0.0f }, { 1.f, 0.f } },
+        { { 1.f, 1.f, 0.0f }, { 1.f, 1.f } },
+        { { -1.f, 1.f, 0.0f }, { 0.f, 1.f } }
+    };
 
-    GLint posAttrib = glGetAttribLocation(*shader, "position_vertex");
-    GLint uvAttrib = glGetAttribLocation(*shader, "uv_vertex");
+    glGenVertexArrays(1, &m_offscreen_vao);
+    glBindVertexArray(m_offscreen_vao);
+    glGenBuffers(1, &m_offscreen_vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, m_offscreen_vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(offscreen_vertices), offscreen_vertices, GL_STATIC_DRAW);
+    glBindVertexArray(0);
 
-    // 1st attribute: positions
-    glVertexAttribPointer(
-        posAttrib, // attribute index
-        3, // size
-        GL_FLOAT, // type
-        GL_FALSE, // normalized?
-        screen_vertex_size, // stride
-        reinterpret_cast<void *>(0) // array buffer offset
-    );
-    glEnableVertexAttribArray(posAttrib);
+    // SMAA and FSR are optional, they simply stay unavailable if they could not be set up
+    m_smaa_filter = std::make_unique<SMAAScreenFilter>(*this);
+    if (!m_smaa_filter->init(static_assets))
+        m_smaa_filter.reset();
 
-    // 2nd attribute: uvs
-    glVertexAttribPointer(
-        uvAttrib, // attribute index
-        2, // size
-        GL_FLOAT, // type
-        GL_FALSE, // normalized?
-        screen_vertex_size, // stride
-        reinterpret_cast<void *>(3 * sizeof(GLfloat)) // array buffer offset
-    );
-    glEnableVertexAttribArray(uvAttrib);
+    m_fsr_filter = std::make_unique<FSRScreenFilter>(*this);
+    if (!m_fsr_filter->init(static_assets))
+        m_fsr_filter.reset();
 
     glClearColor(32.0f / 255.0f, 178.0f / 255.0f, 170.0f / 255.0f, 1.0f);
     glClearDepthf(1.0f);
 
     return true;
+}
+
+void ScreenRenderer::set_filter(const std::string_view &filter) {
+    ScreenFilter *wanted = m_bilinear_filter.get();
+    if (filter == "Nearest")
+        wanted = m_nearest_filter.get();
+    else if (filter == "Bicubic")
+        wanted = m_bicubic_filter.get();
+    else if (filter == "FXAA")
+        wanted = m_fxaa_filter.get();
+    else if (filter == "SMAA")
+        wanted = m_smaa_filter.get();
+    else if (filter == "FSR")
+        wanted = m_fsr_filter.get();
+
+    if (!wanted) {
+        LOG_WARN("{} is not available, falling back to bilinear", filter);
+        wanted = m_bilinear_filter.get();
+    }
+
+    m_filter = wanted;
+}
+
+void ScreenRenderer::bind_screen_quad(const float *uvs) {
+    glBindVertexArray(m_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
+
+    if ((uvs[0] == last_uvs[0]) && (uvs[1] == last_uvs[1]) && (uvs[2] == last_uvs[2]) && (uvs[3] == last_uvs[3]))
+        return;
+
+    // Reupload the data again
+    screen_vertices_t vertex_buffer_data = {
+        { { -1.f, -1.f, 0.0f }, { 0.f, 1.f } },
+        { { 1.f, -1.f, 0.0f }, { 1.f, 1.f } },
+        { { 1.f, 1.f, 0.0f }, { 1.f, 0.f } },
+        { { -1.f, 1.f, 0.0f }, { 0.f, 0.f } }
+    };
+
+    vertex_buffer_data[0].uv[0] = uvs[0];
+    vertex_buffer_data[0].uv[1] = uvs[3];
+
+    vertex_buffer_data[1].uv[0] = uvs[2];
+    vertex_buffer_data[1].uv[1] = uvs[3];
+
+    vertex_buffer_data[2].uv[0] = uvs[2];
+    vertex_buffer_data[2].uv[1] = uvs[1];
+
+    vertex_buffer_data[3].uv[0] = uvs[0];
+    vertex_buffer_data[3].uv[1] = uvs[1];
+
+    last_uvs[0] = uvs[0];
+    last_uvs[1] = uvs[1];
+    last_uvs[2] = uvs[2];
+    last_uvs[3] = uvs[3];
+
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_buffer_data), nullptr, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_buffer_data), vertex_buffer_data, GL_DYNAMIC_DRAW);
+}
+
+void ScreenRenderer::bind_offscreen_quad() {
+    glBindVertexArray(m_offscreen_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_offscreen_vbo);
+}
+
+void ScreenRenderer::begin_screen_pass(const SceFVector2 &viewport_pos, const SceFVector2 &viewport_size, GLuint default_fbo) {
+    glBindFramebuffer(GL_FRAMEBUFFER, default_fbo);
+
+    glViewport(static_cast<GLint>(viewport_pos.x), static_cast<GLint>(viewport_pos.y), static_cast<GLsizei>(viewport_size.x),
+        static_cast<GLsizei>(viewport_size.y));
+
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClearDepthf(1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    // should not be needed, but just in case
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 }
 
 void ScreenRenderer::render(const SceFVector2 &viewport_pos, const SceFVector2 &viewport_size, const float *uvs, const GLuint texture, const SceFVector2 texture_size, GLuint default_fbo) {
@@ -143,146 +214,18 @@ void ScreenRenderer::render(const SceFVector2 &viewport_pos, const SceFVector2 &
     GLboolean last_color_mask[4];
     glGetBooleanv(GL_COLOR_WRITEMASK, last_color_mask);
 
-    glBindFramebuffer(GL_FRAMEBUFFER, default_fbo);
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_BLEND);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-
-    glViewport(static_cast<GLint>(viewport_pos.x), static_cast<GLint>(viewport_pos.y), static_cast<GLsizei>(viewport_size.x),
-        static_cast<GLsizei>(viewport_size.y));
-
-    // Clear the whole default framebuffer (covers the letterbox area as well).
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClearDepthf(1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    // should not be needed, but just in case
-    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-
-    const auto &shader = current_shader();
-
-    const GLint posAttrib = glGetAttribLocation(*shader, "position_vertex");
-    const GLint uvAttrib = glGetAttribLocation(*shader, "uv_vertex");
-
-    glUseProgram(*shader);
-    glBindVertexArray(m_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-
-    const float default_uv[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
-
-    if (!uvs) {
-        uvs = default_uv;
-    }
-
-    if ((uvs[0] != last_uvs[0]) || (uvs[1] != last_uvs[1]) || (uvs[2] != last_uvs[2]) || (uvs[3] != last_uvs[3])) {
-        // Reupload the data again
-        screen_vertices_t vertex_buffer_data = {
-            { { -1.f, -1.f, 0.0f }, { 0.f, 1.f } },
-            { { 1.f, -1.f, 0.0f }, { 1.f, 1.f } },
-            { { 1.f, 1.f, 0.0f }, { 1.f, 0.f } },
-            { { -1.f, 1.f, 0.0f }, { 0.f, 0.f } }
-        };
-
-        vertex_buffer_data[0].uv[0] = uvs[0];
-        vertex_buffer_data[0].uv[1] = uvs[3];
-
-        vertex_buffer_data[1].uv[0] = uvs[2];
-        vertex_buffer_data[1].uv[1] = uvs[3];
-
-        vertex_buffer_data[2].uv[0] = uvs[2];
-        vertex_buffer_data[2].uv[1] = uvs[1];
-
-        vertex_buffer_data[3].uv[0] = uvs[0];
-        vertex_buffer_data[3].uv[1] = uvs[1];
-
-        last_uvs[0] = uvs[0];
-        last_uvs[1] = uvs[1];
-        last_uvs[2] = uvs[2];
-        last_uvs[3] = uvs[3];
-
-        glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_buffer_data), nullptr, GL_DYNAMIC_DRAW);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_buffer_data), vertex_buffer_data, GL_DYNAMIC_DRAW);
-    }
-
-    // 1st attribute: positions
-    glVertexAttribPointer(
-        posAttrib, // attribute index
-        3, // size
-        GL_FLOAT, // type
-        GL_FALSE, // normalized?
-        screen_vertex_size, // stride
-        reinterpret_cast<void *>(0) // array buffer offset
-    );
-    glEnableVertexAttribArray(posAttrib);
-
-    // 2nd attribute: uvs
-    glVertexAttribPointer(
-        uvAttrib, // attribute index
-        2, // size
-        GL_FLOAT, // type
-        GL_FALSE, // normalized?
-        screen_vertex_size, // stride
-        reinterpret_cast<void *>(3 * sizeof(GLfloat)) // array buffer offset
-    );
-    glEnableVertexAttribArray(uvAttrib);
-
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glBindSampler(0, current_sampler());
 #ifndef __ANDROID__
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 #endif
 
-    if (filter == Filter::FXAA) {
-        // FXAA must run at the input (render) resolution, 1:1 with the source texture,
-        // otherwise it operates on an already upscaled (blurred) image.
-        // Pass 1: run FXAA into an intermediate FBO sized to the render resolution.
-        // Pass 2: blit that result to the screen with GL_NEAREST (no bilinear upscale).
-        const int fxaa_w = static_cast<int>(texture_size.x);
-        const int fxaa_h = static_cast<int>(texture_size.y);
+    static const float default_uv[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
 
-        // (Re)create the intermediate target when the render resolution changes.
-        if (fxaa_w != m_fxaa_width || fxaa_h != m_fxaa_height) {
-            if (!m_fxaa_fbo) {
-                glGenFramebuffers(1, &m_fxaa_fbo);
-                glGenTextures(1, &m_fxaa_texture);
-            }
-            glBindTexture(GL_TEXTURE_2D, m_fxaa_texture);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, fxaa_w, fxaa_h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-            glBindFramebuffer(GL_FRAMEBUFFER, m_fxaa_fbo);
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_fxaa_texture, 0);
-            m_fxaa_width = fxaa_w;
-            m_fxaa_height = fxaa_h;
-
-            // restore the source texture binding for the FXAA pass below
-            glBindTexture(GL_TEXTURE_2D, texture);
-        }
-
-        // Pass 1: FXAA at render resolution
-        glBindFramebuffer(GL_FRAMEBUFFER, m_fxaa_fbo);
-        glViewport(0, 0, fxaa_w, fxaa_h);
-        glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
-
-        const GLint invScreenLocation = glGetUniformLocation(*shader, "inv_frame_size");
-        glUniform2f(invScreenLocation, 1.0f / texture_size.x, 1.0f / texture_size.y);
-
-        glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
-
-        // Pass 2: nearest-blit to the screen (no bilinear)
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, m_fxaa_fbo);
-        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, default_fbo);
-        glBlitFramebuffer(
-            0, 0, fxaa_w, fxaa_h,
-            static_cast<GLint>(viewport_pos.x), static_cast<GLint>(viewport_pos.y),
-            static_cast<GLint>(viewport_pos.x + viewport_size.x),
-            static_cast<GLint>(viewport_pos.y + viewport_size.y),
-            GL_COLOR_BUFFER_BIT, GL_NEAREST);
-    } else {
-        // Bilinear / Nearest / Bicubic draw directly to the screen.
-        glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
-    }
+    m_filter->render(texture, texture_size, uvs ? uvs : default_uv, viewport_pos, viewport_size, default_fbo);
 
     // Restore modified GL state
     glUseProgram(last_program);
@@ -317,31 +260,30 @@ void ScreenRenderer::render(const SceFVector2 &viewport_pos, const SceFVector2 &
 }
 
 void ScreenRenderer::destroy() {
-    m_render_shader_nofilter.reset();
-    m_render_shader_fxaa.reset();
-    m_render_shader_bicubic.reset();
-
-    glDeleteSamplers(1, &m_sampler_linear);
-    m_sampler_linear = 0;
-    glDeleteSamplers(1, &m_sampler_nearest);
-    m_sampler_nearest = 0;
-
-    if (m_fxaa_fbo) {
-        glDeleteFramebuffers(1, &m_fxaa_fbo);
-        m_fxaa_fbo = 0;
+    m_filter = nullptr;
+    for (ScreenFilter *filter : { m_nearest_filter.get(), m_bilinear_filter.get(), m_bicubic_filter.get(),
+             m_fxaa_filter.get(), m_smaa_filter.get(), m_fsr_filter.get() }) {
+        if (filter)
+            filter->destroy();
     }
-    if (m_fxaa_texture) {
-        glDeleteTextures(1, &m_fxaa_texture);
-        m_fxaa_texture = 0;
-    }
-    m_fxaa_width = 0;
-    m_fxaa_height = 0;
+    m_nearest_filter.reset();
+    m_bilinear_filter.reset();
+    m_bicubic_filter.reset();
+    m_fxaa_filter.reset();
+    m_smaa_filter.reset();
+    m_fsr_filter.reset();
 
     glDeleteBuffers(1, &m_vbo);
     m_vbo = 0;
 
     glDeleteVertexArrays(1, &m_vao);
     m_vao = 0;
+
+    glDeleteBuffers(1, &m_offscreen_vbo);
+    m_offscreen_vbo = 0;
+
+    glDeleteVertexArrays(1, &m_offscreen_vao);
+    m_offscreen_vao = 0;
 
     glDeleteTextures(1, &m_screen_texture);
     m_screen_texture = 0;
