@@ -72,6 +72,7 @@ struct GLColorSurfaceCacheInfo : public GLSurfaceCacheInfo {
 
     SceGxmColorBaseFormat format;
     std::uint32_t swizzle;
+    bool is_gamma_corrected;
 
     Ptr<void> data;
     bool is_ping_pong_dirty;
@@ -117,7 +118,7 @@ public:
 
     GLuint retrieve_color_surface_texture_handle(const State &state, std::uint16_t width, std::uint16_t height, const std::uint16_t pixel_stride,
         const SceGxmColorBaseFormat color_format, Ptr<void> address, SurfaceTextureRetrievePurpose purpose, std::uint32_t &swizzle,
-        std::uint16_t *stored_height = nullptr, std::uint16_t *stored_width = nullptr);
+        std::uint32_t gamma = 0, std::uint16_t *stored_height = nullptr, std::uint16_t *stored_width = nullptr);
     GLuint retrieve_ping_pong_color_surface_texture_handle(Ptr<void> address);
 
     // We really can't sample this around... The only usage of this function is interally load/store from this texture.

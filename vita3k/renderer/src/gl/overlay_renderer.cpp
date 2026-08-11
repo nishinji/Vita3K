@@ -436,6 +436,7 @@ void OverlayRenderer::render(const overlay::display_manager &manager,
     glGetBooleanv(GL_COLOR_WRITEMASK, last_color_mask);
 
     glBindFramebuffer(GL_FRAMEBUFFER, default_fbo);
+    glDisable(GL_FRAMEBUFFER_SRGB);
     glViewport(static_cast<GLint>(viewport_x), static_cast<GLint>(viewport_y),
         static_cast<GLsizei>(viewport_w), static_cast<GLsizei>(viewport_h));
 

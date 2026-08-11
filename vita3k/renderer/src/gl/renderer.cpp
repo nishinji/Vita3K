@@ -403,6 +403,14 @@ void set_context(GLState &state, GLContext &context, const MemState &mem, const 
 
     glBindFramebuffer(GL_FRAMEBUFFER, context.current_framebuffer);
 
+    // Encode what the shader writes into the surface. This has to be scoped to the scene: the default
+    // framebuffer reports an sRGB encoding on some drivers, and leaving it on would encode the final
+    // blit to the screen as well.
+    if (color_surface_fin && color_surface_fin->gamma)
+        glEnable(GL_FRAMEBUFFER_SRGB);
+    else
+        glDisable(GL_FRAMEBUFFER_SRGB);
+
     if (context.record.region_clip_mode != SCE_GXM_REGION_CLIP_NONE) {
         glDisable(GL_SCISSOR_TEST);
     }

@@ -118,6 +118,8 @@ void ScreenRenderer::render(const SceFVector2 &viewport_pos, const SceFVector2 &
     glGetBooleanv(GL_COLOR_WRITEMASK, last_color_mask);
 
     glBindFramebuffer(GL_FRAMEBUFFER, default_fbo);
+    // The surface already holds what the guest would have scanned out, so nothing must re-encode it.
+    glDisable(GL_FRAMEBUFFER_SRGB);
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_BLEND);
     glDisable(GL_DEPTH_TEST);

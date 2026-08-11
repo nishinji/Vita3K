@@ -23,6 +23,13 @@
 
 #include <chrono>
 
+// EXT_texture_sRGB_decode, not exposed by our glad loader.
+#ifndef GL_TEXTURE_SRGB_DECODE_EXT
+#define GL_TEXTURE_SRGB_DECODE_EXT 0x8A48
+#define GL_DECODE_EXT 0x8A49
+#define GL_SKIP_DECODE_EXT 0x8A4A
+#endif
+
 namespace renderer::gl {
 static constexpr std::uint64_t CASTED_UNUSED_TEXTURE_PURGE_SECS = 40;
 
@@ -79,7 +86,7 @@ void GLSurfaceCache::do_typeless_copy(const GLuint dest_texture, const GLuint so
 
 GLuint GLSurfaceCache::retrieve_color_surface_texture_handle(const State &state, std::uint16_t width, std::uint16_t height, const std::uint16_t pixel_stride,
     const SceGxmColorBaseFormat base_format, Ptr<void> address, SurfaceTextureRetrievePurpose purpose, std::uint32_t &swizzle,
-    std::uint16_t *stored_height, std::uint16_t *stored_width) {
+    std::uint32_t gamma, std::uint16_t *stored_height, std::uint16_t *stored_width) {
     // Create the key to access the cache struct
     const std::uint64_t key = address.address();
 
@@ -108,12 +115,29 @@ GLuint GLSurfaceCache::retrieve_color_surface_texture_handle(const State &state,
     GLenum surface_upload_format = color::translate_format(base_format);
     GLenum surface_data_type = color::translate_type(base_format);
 
+    // The guest asked for a gamma corrected surface, so the hardware encodes what the shader writes
+    // and decodes what it reads back. This is what the Vulkan backend gets out of its sRGB format;
+    // without it the colours the shader produces are stored as linear and come out too dark.
+    const bool is_gamma_corrected = (gamma != 0) && (surface_internal_format == GL_RGBA8);
+    if (is_gamma_corrected)
+        surface_internal_format = GL_SRGB8_ALPHA8;
+
     std::size_t bytes_per_stride = pixel_stride * color::bytes_per_pixel(base_format);
     std::size_t total_surface_size = bytes_per_stride * original_height;
 
     if (overlap) {
         GLColorSurfaceCacheInfo &info = *ite->second;
         auto used_iterator = std::find(last_use_color_surface_index.begin(), last_use_color_surface_index.end(), ite->first);
+
+        // Undo the skip presentation asked for, the shader wants linear values again.
+        if (info.is_gamma_corrected)
+            glTextureParameteri(info.gl_texture[0], GL_TEXTURE_SRGB_DECODE_EXT, GL_DECODE_EXT);
+
+        // Gamma is decided once, when the surface is created. Changing it for an existing surface
+        // would mean remaking the texture, and that path also rewrites the extent the presentation
+        // code derives its uvs from. Just keep whatever the surface was made with.
+        if (info.is_gamma_corrected && surface_internal_format == GL_RGBA8)
+            surface_internal_format = GL_SRGB8_ALPHA8;
 
         if (stored_height) {
             *stored_height = info.original_height;
@@ -438,6 +462,7 @@ GLuint GLSurfaceCache::retrieve_color_surface_texture_handle(const State &state,
     info_added->total_bytes = bytes_per_stride * original_height;
     info_added->format = base_format;
     info_added->swizzle = swizzle;
+    info_added->is_gamma_corrected = is_gamma_corrected;
     info_added->flags = 0;
     info_added->is_ping_pong_dirty = true;
 
@@ -521,6 +546,11 @@ GLuint GLSurfaceCache::retrieve_ping_pong_color_surface_texture_handle(Ptr<void>
     GLenum surface_internal_format = color::translate_internal_format(info.format);
     GLenum surface_upload_format = color::translate_format(info.format);
     GLenum surface_data_type = color::translate_type(info.format);
+
+    // The copy below moves raw bits, so the ping pong texture has to decode them the same way the
+    // surface does or the shader reads gamma encoded values as if they were linear.
+    if (info.is_gamma_corrected && surface_internal_format == GL_RGBA8)
+        surface_internal_format = GL_SRGB8_ALPHA8;
 
     if (!info.gl_ping_pong_texture[0]) {
         if (!info.gl_ping_pong_texture.init(glGenTextures, glDeleteTextures)) {
@@ -690,7 +720,7 @@ GLuint GLSurfaceCache::retrieve_framebuffer_handle(const State &state, const Mem
         std::uint32_t swizzle_set = color->colorFormat & SCE_GXM_COLOR_SWIZZLE_MASK;
         color_handle = retrieve_color_surface_texture_handle(state, color->width,
             color->height, color->strideInPixels, gxm::get_base_format(color->colorFormat), color->data,
-            SurfaceTextureRetrievePurpose::WRITING, swizzle_set, stored_height);
+            SurfaceTextureRetrievePurpose::WRITING, swizzle_set, color->gamma, stored_height);
     } else {
         color_handle = target->attachments[0];
     }
@@ -791,6 +821,11 @@ GLuint GLSurfaceCache::sourcing_color_surface_for_presentation(Ptr<const void> a
 
             texture_size.x = info.width;
             texture_size.y = info.height;
+
+            // Presentation wants the stored bytes as they are: they already are what the guest would
+            // have scanned out. Decoding them here would undo the encoding done when they were written.
+            if (info.is_gamma_corrected)
+                glTextureParameteri(info.gl_texture[0], GL_TEXTURE_SRGB_DECODE_EXT, GL_SKIP_DECODE_EXT);
 
             return info.gl_texture[0];
         }
