@@ -22,6 +22,7 @@
 #include <renderer/gl/types.h>
 
 #include <gxm/functions.h>
+#include <util/log.h>
 
 namespace renderer::gl {
 
@@ -97,6 +98,46 @@ void GLTextureCache::select(size_t index, const SceGxmTexture &texture) {
     glBindTexture(get_gl_texture_type(texture), gl_texture);
 }
 
+// EXT_texture_sRGB, not exposed by our glad loader.
+#ifndef GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT
+#define GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT 0x8C4D
+#define GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT 0x8C4E
+#define GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT 0x8C4F
+#endif
+
+static GLenum linear_to_srgb(const SceGxmTextureBaseFormat base_format, const GLenum internal_format) {
+    switch (internal_format) {
+    case GL_RGBA:
+        // GL_RGBA is shared between the formats with 8 bits per channel and the packed ones,
+        // and only the former have an sRGB counterpart. The Vulkan backend draws the same line.
+        switch (base_format) {
+        case SCE_GXM_TEXTURE_BASE_FORMAT_U4U4U4U4:
+        case SCE_GXM_TEXTURE_BASE_FORMAT_U1U5U5U5:
+        case SCE_GXM_TEXTURE_BASE_FORMAT_U2F10F10F10:
+            LOG_WARN_ONCE("Trying to use gamma correction with non-compatible texture format {}", fmt::underlying(base_format));
+            return internal_format;
+        default:
+            break;
+        }
+        [[fallthrough]];
+    case GL_RGBA8:
+        return GL_SRGB8_ALPHA8;
+    case GL_RGB8:
+        return GL_SRGB8;
+    case GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:
+        return GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT;
+    case GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:
+        return GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT;
+    case GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:
+        return GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT;
+    case GL_COMPRESSED_RGBA_BPTC_UNORM:
+        return GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM;
+    default:
+        LOG_WARN_ONCE("Trying to use gamma correction with non-compatible internal format {}", log_hex(internal_format));
+        return internal_format;
+    }
+}
+
 static GLenum bcn_to_rgba8(const SceGxmTextureBaseFormat format) {
     switch (format) {
     case SCE_GXM_TEXTURE_BASE_FORMAT_UBC4:
@@ -160,6 +201,10 @@ void GLTextureCache::configure_texture(const SceGxmTexture &gxm_texture) {
         format = (num_comp == 4) ? GL_RGBA : (num_comp == 2 ? GL_RG : GL_RED);
     }
 
+    // The texture holds sRGB values that the hardware decodes to linear on every fetch.
+    if (gxm_texture.gamma_mode)
+        internal_format = linear_to_srgb(base_format, internal_format);
+
     // GXM's cube map index is same as OpenGL: right, left, top, bottom, front, back
     GLenum upload_type = GL_TEXTURE_2D;
 
@@ -222,7 +267,11 @@ void GLTextureCache::upload_texture_impl(SceGxmTextureBaseFormat base_format, ui
             glPixelStorei(GL_UNPACK_COMPRESSED_BLOCK_HEIGHT, block_height);
         }
 
-        const GLenum format = translate_format(base_format);
+        // The format must be an exact match for the storage, which translate_format() cannot give:
+        // configure_texture() picks the sRGB variant for a gamma corrected texture, and a mismatch
+        // here makes the upload fail and leaves the texture undefined.
+        GLint format = 0;
+        glGetTexLevelParameteriv(upload_type, mip_index, GL_TEXTURE_INTERNAL_FORMAT, &format);
         size_t compressed_size = renderer::texture::get_compressed_size(base_format, width, height);
         glCompressedTexSubImage2D(upload_type, mip_index, 0, 0, width, height, format, static_cast<GLsizei>(compressed_size), pixels);
 
