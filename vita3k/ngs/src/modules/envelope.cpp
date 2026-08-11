@@ -22,20 +22,6 @@
 
 namespace ngs {
 
-// The height a segment starts from is the one the segment before it ended on, and the first
-// one rises from silence.
-static float segment_start_height(const SceNgsEnvelopeParams *params, const int32_t point) {
-    return (point <= 0) ? 0.0f : params->envelopePoints[point - 1].fAmplitude;
-}
-
-static float interpolate_segment(const SceNgsEnvelopePoint &point, const float from, const float progress) {
-    // A curved segment is eased rather than straight. The exact shape the hardware uses is not
-    // documented anywhere we know of, so this is a plain quadratic: it starts gently and ends on
-    // the same amplitude a linear one would, which is what keeps a chain of segments continuous.
-    const float t = (point.eCurveType == SCE_NGS_ENVELOPE_CURVED) ? progress * progress : progress;
-    return from + (point.fAmplitude - from) * t;
-}
-
 bool EnvelopeModule::process(KernelState &kern, const MemState &mem, const SceUID thread_id, ModuleData &data, std::unique_lock<std::recursive_mutex> &scheduler_lock, std::unique_lock<std::mutex> &voice_lock) {
     if (data.is_bypassed)
         return false;
@@ -78,18 +64,26 @@ bool EnvelopeModule::process(KernelState &kern, const MemState &mem, const SceUI
                 const float progress = std::min(state->fPosition / static_cast<float>(params->uReleaseMsecs), 1.0f);
                 state->fCurrentHeight = state->fReleaseScale * (1.0f - progress);
             }
-        } else if (state->nCurrentPoint >= total_points) {
-            // Past the last point the envelope holds the amplitude it ended on.
+        } else if (state->nCurrentPoint >= total_points - 1) {
+            // Past the last point the envelope holds the amplitude that point asked for.
             state->fCurrentHeight = params->envelopePoints[total_points - 1].fAmplitude;
         } else {
+            // A point carries the amplitude the envelope has when it reaches it, and the time it
+            // takes to travel from there to the next one. The very first point is where the
+            // envelope starts rather than something it climbs to.
             const SceNgsEnvelopePoint &point = params->envelopePoints[state->nCurrentPoint];
-            const float from = segment_start_height(params, state->nCurrentPoint);
+            const float from = point.fAmplitude;
+            const float to = params->envelopePoints[state->nCurrentPoint + 1].fAmplitude;
 
             if (point.uMsecsToNextPoint == 0) {
-                state->fCurrentHeight = point.fAmplitude;
+                state->fCurrentHeight = to;
             } else {
                 const float progress = std::min(state->fPosition / static_cast<float>(point.uMsecsToNextPoint), 1.0f);
-                state->fCurrentHeight = interpolate_segment(point, from, progress);
+                // The shape of a curved segment is not documented anywhere we know of, so it is
+                // eased with a quadratic: it ends on the amplitude a linear one would, which is
+                // what keeps a chain of segments continuous.
+                const float t = (point.eCurveType == SCE_NGS_ENVELOPE_CURVED) ? progress * progress : progress;
+                state->fCurrentHeight = from + (to - from) * t;
             }
 
             if (state->fPosition >= static_cast<float>(point.uMsecsToNextPoint)) {
