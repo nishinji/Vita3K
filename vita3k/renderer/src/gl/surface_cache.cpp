@@ -153,13 +153,18 @@ GLuint GLSurfaceCache::retrieve_color_surface_texture_handle(const State &state,
             // don't even try to match u8u8u8 with something else
             return 0;
 
-        // A read that asks for the stride width is the guest looking at the same memory through a
-        // wider texture, not a request for a bigger surface. Growing it here rewrites the extent the
-        // surface is known by, including the one presentation derives its uvs from, and the write
-        // path only ever grows, so the display stays cropped for the rest of the scene. Serve the
-        // surface at the size it was made with instead.
+        // A read that asks for the stride width over the same rows is the guest looking at the same
+        // memory through a wider texture, not a request for a bigger surface. Growing it here
+        // rewrites the extent the surface is known by, including the one presentation derives its
+        // uvs from, and the write path only ever grows, so the display stays cropped for the rest of
+        // the scene. Serve the surface at the size it was made with instead.
+        //
+        // The rows have to match: a read that grows both dimensions is asking for something else,
+        // usually a power of two view for a filtering pass, and does want the bigger surface.
+        // The stride is in guest pixels, so it is compared against the width the guest asked for
+        // rather than the one scaled to the resolution multiplier.
         if (purpose == SurfaceTextureRetrievePurpose::READING && width > info.width
-            && width <= info.pixel_stride && pixel_stride == info.pixel_stride)
+            && height <= info.height && original_width <= info.pixel_stride && pixel_stride == info.pixel_stride)
             width = info.width;
 
         // There are four situations I think of:
