@@ -25,10 +25,24 @@
 #include <string>
 #include <vector>
 
+// EXT_texture_sRGB_decode, not exposed by our glad loader.
+#ifndef GL_TEXTURE_SRGB_DECODE_EXT
+#define GL_TEXTURE_SRGB_DECODE_EXT 0x8A48
+#define GL_SKIP_DECODE_EXT 0x8A4A
+#endif
+
 namespace renderer::gl {
 
 // the same default the vulkan backend uses for its FSR filter
 static constexpr float fsr_sharpening = 0.2f;
+
+// A gamma corrected colour surface is an sRGB texture holding what the guest would have
+// scanned out, so the screen path must take its bytes as they are. The surface cache asks
+// for that on the texture object, but a bound sampler overrides it, so every sampler that
+// reads the frame has to say the same thing. It is a no-op on the formats that are not sRGB.
+static void skip_srgb_decode(GLuint sampler) {
+    glSamplerParameteri(sampler, GL_TEXTURE_SRGB_DECODE_EXT, GL_SKIP_DECODE_EXT);
+}
 
 static fs::path builtin_shaders_path(const fs::path &static_assets) {
     return static_assets / "shaders-builtin/opengl";
@@ -41,6 +55,7 @@ static GLuint create_clamped_sampler(GLint filter) {
     glSamplerParameteri(sampler, GL_TEXTURE_MAG_FILTER, filter);
     glSamplerParameteri(sampler, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glSamplerParameteri(sampler, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    skip_srgb_decode(sampler);
     return sampler;
 }
 
@@ -390,6 +405,7 @@ bool FSRScreenFilter::init(const fs::path &static_assets) {
     glSamplerParameteri(sampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glSamplerParameteri(sampler, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glSamplerParameteri(sampler, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    skip_srgb_decode(sampler);
 
     glGenFramebuffers(1, &fbo);
     glGenTextures(1, &upscaled_texture);

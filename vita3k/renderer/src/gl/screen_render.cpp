@@ -215,6 +215,7 @@ void ScreenRenderer::render(const SceFVector2 &viewport_pos, const SceFVector2 &
     glGetBooleanv(GL_COLOR_WRITEMASK, last_color_mask);
 
     // The surface already holds what the guest would have scanned out, so nothing must re-encode it.
+    // This is global state, so it covers whatever the filter binds on its way to the screen.
     glDisable(GL_FRAMEBUFFER_SRGB);
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_BLEND);
