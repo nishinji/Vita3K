@@ -124,6 +124,11 @@ static GLenum linear_to_srgb(const SceGxmTextureBaseFormat base_format, const GL
         return GL_SRGB8_ALPHA8;
     case GL_RGB8:
         return GL_SRGB8;
+    case GL_RGB565:
+        // There is no sRGB 565, so the texture has to be widened to keep its gamma. The packed
+        // client type stays as it is: glTexImage2D lets the internal format and the type the
+        // guest data is handed over in disagree, and the driver expands the channels for us.
+        return GL_SRGB8;
     case GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:
         return GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT;
     case GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:
