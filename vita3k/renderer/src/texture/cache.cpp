@@ -21,6 +21,7 @@
 #include <renderer/texture_cache.h>
 
 #include <gxm/functions.h>
+#include <mem/functions.h>
 #include <mem/ptr.h>
 #include <util/align.h>
 #include <util/log.h>
@@ -412,6 +413,19 @@ void TextureCache::upload_texture(const SceGxmTexture &gxm_texture, MemState &me
     const uint32_t org_layout_height = layout_height;
 
     while (face_uploaded_count < face_total_count && org_width > 0 && org_height > 0) {
+        const uint32_t nb_pixels = align(layout_width, align_width) * align(layout_height, align_height);
+        const uint32_t mip_size = (nb_pixels >> block_shift) * block_size;
+
+        // Only the first mip is ever hashed, so nothing has read this far into the texture before now.
+        // A guest that gives us a mip or face count larger than what it allocated makes us walk into
+        // unmapped memory, and both backends hand the pointer straight to the driver, where the fault
+        // happens outside of anything we can recover from.
+        if (!is_valid_addr_range(mem, data.address() + total_source_so_far, data.address() + total_source_so_far + mip_size)) {
+            LOG_ERROR_ONCE("Texture at {} ({}x{}, format 0x{:X}) claims more data than it owns, stopping at mip {} of face {}",
+                log_hex(data.address()), org_width, org_height, fmt::underlying(base_format), mip_index, face_uploaded_count);
+            return;
+        }
+
         pixels = texture_data;
 
         SceGxmTextureBaseFormat upload_format = base_format;
@@ -570,8 +584,6 @@ void TextureCache::upload_texture(const SceGxmTexture &gxm_texture, MemState &me
         if (export_textures)
             export_texture_impl(upload_format, width, height, mip_index, pixels, upload_type, pixels_per_stride);
 
-        const uint32_t nb_pixels = align(layout_width, align_width) * align(layout_height, align_height);
-        const uint32_t mip_size = (nb_pixels >> block_shift) * block_size;
         texture_data += mip_size;
         total_source_so_far += mip_size;
 
