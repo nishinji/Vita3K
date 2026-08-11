@@ -64,6 +64,9 @@ public:
     uint32_t get_buffer_parameter_size() const override {
         return get_max_parameter_size();
     }
+    uint32_t get_guest_state_size() const override {
+        return sizeof(SceNgsEnvelopeStates);
+    }
 };
 
 } // namespace ngs
