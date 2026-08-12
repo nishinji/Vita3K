@@ -345,6 +345,7 @@ bool GLState::init() {
 }
 
 void GLState::late_init(const Config &cfg, const std::string_view game_id, MemState &mem) {
+    texture_cache.state = this;
     texture_cache.init(true, texture_folder(), game_id);
 }
 
@@ -808,7 +809,20 @@ void GLState::render_frame(DisplayState &display, const GxmState &gxm, MemState 
             const auto pixels = display_frame.base.cast<void>().get(mem);
 
             glPixelStorei(GL_UNPACK_ROW_LENGTH, display_frame.pitch);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, display_frame.image_size.x, display_frame.image_size.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+
+            // With memory mapping on, the guest's framebuffer lives in the guest memory buffer, so
+            // this pointer is a mapping of one of our own buffers. Read it as the buffer it is
+            // rather than asking the driver to treat it as ordinary client memory.
+            const int64_t buffer_offset = get_buffer_offset_of(pixels);
+            if (buffer_offset >= 0) {
+                glBindBuffer(GL_PIXEL_UNPACK_BUFFER, guest_memory_buffer[0]);
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, display_frame.image_size.x, display_frame.image_size.y, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                    reinterpret_cast<const void *>(static_cast<uintptr_t>(buffer_offset)));
+                glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+            } else {
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, display_frame.image_size.x, display_frame.image_size.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+            }
+
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
             glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);

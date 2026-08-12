@@ -99,6 +99,8 @@ struct GLState : public renderer::State {
     uint8_t *guest_memory_base = nullptr;
     // Byte offset of guest_memory_base inside guest_memory_buffer.
     uint32_t guest_memory_base_offset = 0;
+    // Size the buffer was created with, so that a host pointer can be tested against its mapping.
+    uint32_t guest_memory_buffer_size = 0;
     // Free ranges of the buffer, as (first 4 KiB block, block count). Kept coalesced.
     std::map<uint32_t, uint32_t> guest_memory_free_blocks;
     // Mapped regions keyed by guest address. std::greater so that lower_bound() lands on the
@@ -118,6 +120,11 @@ struct GLState : public renderer::State {
     // Byte offset of a guest address inside guest_memory_buffer. Returns 0 for an address that is
     // not mapped: that reads the wrong data, but it stays in bounds.
     uint32_t get_matching_offset(Address address);
+    // Byte offset of a host pointer inside guest_memory_buffer, or -1 if it points elsewhere.
+    // A pointer that lands inside must never be handed to GL as client memory: it is a mapping of
+    // a buffer the driver already owns, and reading it as if it were ordinary memory is not the
+    // same thing as reading the buffer.
+    int64_t get_buffer_offset_of(const void *host_pointer) const;
 
     void render_frame(DisplayState &display, const GxmState &gxm, MemState &mem) override;
     void swap_window() override;

@@ -253,6 +253,16 @@ void GLTextureCache::upload_texture_impl(SceGxmTextureBaseFormat base_format, ui
         // GXM's cube map index is same as OpenGL: right, left, top, bottom, front, back
         upload_type = GL_TEXTURE_CUBE_MAP_POSITIVE_X + (face - 1);
 
+    // A texture that needed no conversion is still sitting in guest memory, so with memory mapping
+    // on this points inside a mapping of the guest memory buffer. Passing that as client memory
+    // asks the driver to read a buffer it already owns as if it were ordinary storage; name the
+    // buffer and an offset into it instead.
+    const int64_t buffer_offset = state ? state->get_buffer_offset_of(pixels) : -1;
+    if (buffer_offset >= 0) {
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, state->guest_memory_buffer[0]);
+        pixels = reinterpret_cast<const void *>(static_cast<uintptr_t>(buffer_offset));
+    }
+
     if (gxm::is_bcn_format(base_format) || renderer::texture::is_astc_format(base_format)) {
         glPixelStorei(GL_UNPACK_ROW_LENGTH, static_cast<GLint>(pixels_per_stride));
 
@@ -293,6 +303,9 @@ void GLTextureCache::upload_texture_impl(SceGxmTextureBaseFormat base_format, ui
 
         glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     }
+
+    if (buffer_offset >= 0)
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 }
 
 void GLTextureCache::import_configure_impl(SceGxmTextureBaseFormat base_format, uint32_t width, uint32_t height, bool is_srgb, uint16_t nb_components, uint16_t mipcount, bool swap_rb) {

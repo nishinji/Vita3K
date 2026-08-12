@@ -42,11 +42,15 @@ bool GLState::create_guest_memory_buffer() {
 
     // The guest writes to this mapping directly (its page table is redirected here) and reads back
     // whatever the shaders stored, so it must be readable, writable and coherent.
-    constexpr GLbitfield flags = GL_MAP_READ_BIT | GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
+    constexpr GLbitfield map_flags = GL_MAP_READ_BIT | GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
+    // This buffer is the guest's ram: the cpu touches it constantly and the gpu only reads from it
+    // a few times a frame, so ask for it to live in client memory rather than across the bus. The
+    // vulkan side asks for the same thing by preferring a host cached memory type.
+    constexpr GLbitfield storage_flags = map_flags | GL_CLIENT_STORAGE_BIT;
 
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, guest_memory_buffer[0]);
-    glBufferStorage(GL_SHADER_STORAGE_BUFFER, GUEST_MEMORY_BUFFER_SIZE, nullptr, flags);
-    uint8_t *base = static_cast<uint8_t *>(glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, GUEST_MEMORY_BUFFER_SIZE, flags));
+    glBufferStorage(GL_SHADER_STORAGE_BUFFER, GUEST_MEMORY_BUFFER_SIZE, nullptr, storage_flags);
+    uint8_t *base = static_cast<uint8_t *>(glMapBufferRange(GL_SHADER_STORAGE_BUFFER, 0, GUEST_MEMORY_BUFFER_SIZE, map_flags));
 
     // The binding is context state and the buffer lives as long as the renderer does, so binding it
     // once here is enough for every program that reads guest memory.
@@ -63,6 +67,7 @@ bool GLState::create_guest_memory_buffer() {
     const uint64_t base_value = std::bit_cast<uint64_t>(base);
     guest_memory_base_offset = static_cast<uint32_t>(align(base_value, KiB(4)) - base_value);
     guest_memory_base = base + guest_memory_base_offset;
+    guest_memory_buffer_size = GUEST_MEMORY_BUFFER_SIZE;
 
     const uint32_t total_blocks = (GUEST_MEMORY_BUFFER_SIZE - guest_memory_base_offset) / static_cast<uint32_t>(KiB(4));
     guest_memory_free_blocks.emplace(0, total_blocks);
@@ -159,6 +164,19 @@ void GLState::unmap_memory(MemState &mem, Ptr<void> address) {
 
     free_guest_memory(ite->second.block, ite->second.block_count);
     mapped_memories.erase(ite);
+}
+
+int64_t GLState::get_buffer_offset_of(const void *host_pointer) const {
+    if (!guest_memory_base)
+        return -1;
+
+    const uint8_t *pointer = static_cast<const uint8_t *>(host_pointer);
+    const uint8_t *mapping = guest_memory_base - guest_memory_base_offset;
+
+    if (pointer < mapping || pointer >= mapping + guest_memory_buffer_size)
+        return -1;
+
+    return pointer - mapping;
 }
 
 uint32_t GLState::get_matching_offset(Address address) {

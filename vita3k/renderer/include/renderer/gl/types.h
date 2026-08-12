@@ -107,10 +107,16 @@ struct ShaderTranslateRequest {
     // for instance when asynchronous compilation is turned off from the UI thread.
     std::shared_ptr<ShaderTranslation> target;
 
-    // The gxp program is guest memory. It is kept alive for the duration of the request
-    // by the refcount below, which SceGxm waits on before destroying a program.
-    const SceGxmProgram *program;
+    // A copy of the gxp program rather than a pointer into it. The program lives in guest memory,
+    // and sceGxmMapMemory can redirect the guest page table out from under a worker: the pages a
+    // pointer taken beforehand refers to become inaccessible, and touching them faults forever.
+    std::vector<uint8_t> program_bytes;
+    // Kept anyway, so that SceGxm still waits for the translation before destroying the program.
     std::atomic<uint32_t> *refcount;
+
+    const SceGxmProgram &program() const {
+        return *reinterpret_cast<const SceGxmProgram *>(program_bytes.data());
+    }
 
     bool is_vertex;
     bool maskupdate;
@@ -126,9 +132,14 @@ struct ShaderTranslateRequest {
 typedef std::vector<ExcludedUniform> ExcludedUniforms; // vector instead of unordered_set since it's much faster for few elements
 typedef std::map<GLuint, GLenum> UniformTypes;
 
+struct GLState;
+
 class GLTextureCache : public TextureCache {
 public:
     GLObjectArray<TextureCacheSize> textures;
+    // Set by the owning state. Needed to tell whether a texture's pixels live in the guest memory
+    // buffer rather than in ordinary host memory.
+    GLState *state = nullptr;
 
     bool init(const bool hashless_texture_cache, const fs::path &texture_folder, const std::string_view game_id);
     void cleanup();

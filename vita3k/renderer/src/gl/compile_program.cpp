@@ -258,11 +258,11 @@ void GLState::shader_translate_thread() {
         // which is also what the vulkan backend already runs on its worker threads.
         bool ok = false;
         if (request->spirv) {
-            request->target->spirv = load_spirv_shader(*request->program, features, false, request->hints, request->maskupdate,
+            request->target->spirv = load_spirv_shader(request->program(), features, false, request->hints, request->maskupdate,
                 shaders_path, shaders_log_path, shader_version + "spv", request->use_shader_cache);
             ok = !request->target->spirv.empty();
         } else {
-            request->target->glsl = load_glsl_shader(*request->program, features, request->hints, request->maskupdate,
+            request->target->glsl = load_glsl_shader(request->program(), features, request->hints, request->maskupdate,
                 shaders_path, shaders_log_path, shader_version, request->use_shader_cache);
             ok = !request->target->glsl.empty();
         }
@@ -303,7 +303,9 @@ static SharedGLObject get_or_translate_shader(GLState &renderer, const SceGxmPro
 
             auto *request = new ShaderTranslateRequest();
             request->target = entry;
-            request->program = program;
+            // Take the copy here, on the render thread, while the pointer is still good
+            const auto *program_start = reinterpret_cast<const uint8_t *>(program);
+            request->program_bytes.assign(program_start, program_start + program->size);
             request->refcount = refcount;
             request->is_vertex = (type == GL_VERTEX_SHADER);
             request->maskupdate = maskupdate;
