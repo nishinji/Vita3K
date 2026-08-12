@@ -700,14 +700,14 @@ QGroupBox[flat=&quot;true&quot;]::title {
                  </widget>
                 </item>
                 <item row="4" column="0" colspan="2">
-                 <widget class="QGroupBox" name="gb_vulkan_options">
+                 <widget class="QGroupBox" name="gb_memory_options">
                   <property name="title">
-                   <string>Vulkan Options</string>
+                   <string>Memory Options</string>
                   </property>
                   <property name="flat">
                    <bool>true</bool>
                   </property>
-                  <layout class="QVBoxLayout" name="gb_vulkan_options_layout">
+                  <layout class="QVBoxLayout" name="gb_memory_options_layout">
                    <property name="spacing">
                     <number>8</number>
                    </property>

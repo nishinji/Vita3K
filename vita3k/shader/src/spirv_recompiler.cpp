@@ -981,17 +981,20 @@ static SpirvShaderParameters create_parameters(spv::Builder &b, const SceGxmProg
     const spv::Id u32 = b.makeUintType(32);
     const spv::Id uvec2 = b.makeVectorType(u32, 2);
     const spv::Id vec2 = b.makeVectorType(f32, 2);
+    // opengl reads this block as std140, which pads every array element out to 16 bytes. Vulkan can
+    // use the standard layout and keep the 8-byte elements.
+    const bool block_is_std140 = !translation_state.is_vulkan;
+    const int uniform_array_stride = static_cast<int>(RenderVertUniformBlockExtended::get_array_stride(block_is_std140));
+
     spv::Id buffer_addresses_type = 0;
     if (buffer_count > 0) {
         buffer_addresses_type = b.makeArrayType(uvec2, b.makeUintConstant(buffer_count), 0);
-        // we are using the standard layout, so only an 8-bytes stride
-        b.addDecoration(buffer_addresses_type, spv::DecorationArrayStride, 8);
+        b.addDecoration(buffer_addresses_type, spv::DecorationArrayStride, uniform_array_stride);
     }
     spv::Id viewport_fields_type = 0;
     if (texture_count > 0) {
         viewport_fields_type = b.makeArrayType(vec2, b.makeUintConstant(texture_count), 0);
-        // we are using the standard layout, so only an 8-bytes stride
-        b.addDecoration(viewport_fields_type, spv::DecorationArrayStride, 8);
+        b.addDecoration(viewport_fields_type, spv::DecorationArrayStride, uniform_array_stride);
     }
 
     spv::Id render_buf_type;
@@ -999,6 +1002,22 @@ static SpirvShaderParameters create_parameters(spv::Builder &b, const SceGxmProg
 
     const uint16_t uniform_buffer_count = features.enable_memory_mapping ? buffer_count : 0;
     const uint16_t uniform_texture_count = features.use_texture_viewport ? texture_count : 0;
+
+    if (uniform_buffer_count > 0 && !translation_state.is_vulkan) {
+        // OpenGL has no way to dereference a pointer in a shader, so all the guest memory GXM
+        // mapped lives in one storage buffer and is read by index. A buffer address is then just a
+        // byte offset inside it, which is what the host writes in buffer_addresses.
+        const spv::Id guest_memory_array = b.makeRuntimeArray(f32);
+        b.addDecoration(guest_memory_array, spv::DecorationArrayStride, 4);
+
+        const spv::Id guest_memory_type = b.makeStructType({ guest_memory_array }, "guestMemoryType");
+        b.addDecoration(guest_memory_type, spv::DecorationBlock);
+        b.addMemberDecoration(guest_memory_type, 0, spv::DecorationOffset, 0);
+        b.addMemberName(guest_memory_type, 0, "data");
+
+        spv_params.guest_memory_buffer = b.createVariable(spv::NoPrecision, spv::StorageClassStorageBuffer, guest_memory_type, "guestMemory");
+        b.addDecoration(spv_params.guest_memory_buffer, spv::DecorationBinding, GUEST_MEMORY_SSBO_BINDING);
+    }
 
     if (program_type == SceGxmProgramType::Vertex) {
         // Create the default reg uniform buffer
@@ -1030,7 +1049,7 @@ static SpirvShaderParameters create_parameters(spv::Builder &b, const SceGxmProg
 #undef ADD_VERT_UNIFORM_MEMBER
 #define ADD_EXT_UNIFORM_MEMBER(name)                                                                                                                                                \
     spv_params.name##_id = curr_field_id;                                                                                                                                           \
-    b.addMemberDecoration(render_buf_type, curr_field_id, spv::DecorationOffset, RenderVertUniformBlockExtended::get_##name##_offset(uniform_buffer_count, uniform_texture_count)); \
+    b.addMemberDecoration(render_buf_type, curr_field_id, spv::DecorationOffset, RenderVertUniformBlockExtended::get_##name##_offset(uniform_buffer_count, uniform_texture_count, block_is_std140)); \
     b.addMemberName(render_buf_type, curr_field_id++, #name)
 
         if (uniform_buffer_count > 0) {
@@ -1082,7 +1101,7 @@ static SpirvShaderParameters create_parameters(spv::Builder &b, const SceGxmProg
 
 #define ADD_EXT_UNIFORM_MEMBER(name)                                                                                                                                                \
     spv_params.name##_id = curr_field_id;                                                                                                                                           \
-    b.addMemberDecoration(render_buf_type, curr_field_id, spv::DecorationOffset, RenderFragUniformBlockExtended::get_##name##_offset(uniform_buffer_count, uniform_texture_count)); \
+    b.addMemberDecoration(render_buf_type, curr_field_id, spv::DecorationOffset, RenderFragUniformBlockExtended::get_##name##_offset(uniform_buffer_count, uniform_texture_count, block_is_std140)); \
     b.addMemberName(render_buf_type, curr_field_id++, #name)
 
         if (uniform_buffer_count > 0) {
@@ -1843,7 +1862,9 @@ static SpirvCode convert_gxp_to_spirv_impl(const SceGxmProgram &program, const s
     b.setEmitSpirvDebugInfo();
     b.setDebugMainSourceFile(shader_hash);
     b.addSourceExtension("gxp");
-    if (features.enable_memory_mapping)
+    // only vulkan reads the mapped memory through real pointers, opengl indexes a storage buffer
+    const bool use_buffer_addresses = features.enable_memory_mapping && translation_state.is_vulkan;
+    if (use_buffer_addresses)
         b.setMemoryModel(spv::AddressingModelPhysicalStorageBuffer64, spv::MemoryModelGLSL450);
     else
         b.setMemoryModel(spv::AddressingModelLogical, spv::MemoryModelGLSL450);
@@ -1854,7 +1875,7 @@ static SpirvCode convert_gxp_to_spirv_impl(const SceGxmProgram &program, const s
         b.addCapability(spv::CapabilityImageQuery);
     if (features.support_unknown_format)
         b.addCapability(spv::CapabilityStorageImageReadWithoutFormat);
-    if (features.enable_memory_mapping) {
+    if (use_buffer_addresses) {
         b.addExtension("SPV_KHR_physical_storage_buffer");
         b.addCapability(spv::CapabilityPhysicalStorageBufferAddresses);
     }

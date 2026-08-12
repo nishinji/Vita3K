@@ -55,7 +55,15 @@ static GLenum translate_primitive(SceGxmPrimitiveType primType) {
     return GL_TRIANGLES;
 }
 
-void draw(GLState &renderer, GLContext &context, const FeatureState &features, SceGxmPrimitiveType type, SceGxmIndexFormat format, void *indices, size_t count, uint32_t instance_count,
+void mid_scene_flush() {
+    // Make what the shaders stored in the guest memory buffer visible to whoever reads it next:
+    // the following draws through any of the ways they can reach it, or the guest through the
+    // persistent mapping.
+    glMemoryBarrier(GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT | GL_ELEMENT_ARRAY_BARRIER_BIT
+        | GL_SHADER_STORAGE_BARRIER_BIT | GL_BUFFER_UPDATE_BARRIER_BIT | GL_CLIENT_MAPPED_BUFFER_BARRIER_BIT);
+}
+
+void draw(GLState &renderer, GLContext &context, const FeatureState &features, SceGxmPrimitiveType type, SceGxmIndexFormat format, Ptr<const void> indices, size_t count, uint32_t instance_count,
     MemState &mem, const Config &config) {
     R_PROFILE(__func__);
 
@@ -130,7 +138,18 @@ void draw(GLState &renderer, GLContext &context, const FeatureState &features, S
     if (renderer.features.use_mask_bit)
         glBindImageTexture(shader::MASK_TEXTURE_SLOT_IMAGE, context.render_target->masktexture[0], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA8);
 
-    shader::RenderVertUniformBlock &vert_ublock = context.current_vert_render_info;
+    // the extended block carries the guest memory offsets, whose count depends on the programs
+    if (renderer.features.enable_memory_mapping) {
+        context.current_vert_render_info.set_buffer_count(context.record.vertex_program.get(mem)->renderer_data->buffer_count);
+        context.current_frag_render_info.set_buffer_count(gxm_fragment_program.renderer_data->buffer_count);
+    }
+
+    if (renderer.features.use_texture_viewport) {
+        context.current_vert_render_info.set_texture_count(context.record.vertex_program.get(mem)->renderer_data->texture_count);
+        context.current_frag_render_info.set_texture_count(gxm_fragment_program.renderer_data->texture_count);
+    }
+
+    shader::RenderVertUniformBlock &vert_ublock = context.current_vert_render_info.base_block;
     vert_ublock.viewport_flip = context.record.viewport_flip;
     vert_ublock.viewport_flag = (context.record.viewport_flat) ? 0.0f : 1.0f;
     vert_ublock.z_offset = context.record.z_offset;
@@ -138,16 +157,17 @@ void draw(GLState &renderer, GLContext &context, const FeatureState &features, S
     vert_ublock.screen_width = static_cast<float>(context.record.color_surface.width);
     vert_ublock.screen_height = static_cast<float>(context.record.color_surface.height);
 
-    if (memcmp(&context.previous_vert_info, &vert_ublock, sizeof(shader::RenderVertUniformBlock)) != 0) {
-        std::pair<std::uint8_t *, std::size_t> allocated_buffer = context.vertex_info_uniform_buffer.allocate(sizeof(shader::RenderVertUniformBlock));
-        std::memcpy(allocated_buffer.first, &vert_ublock, sizeof(shader::RenderVertUniformBlock));
+    if (context.current_vert_render_info.changed || memcmp(&context.previous_vert_info, &vert_ublock, sizeof(shader::RenderVertUniformBlock)) != 0) {
+        const uint32_t ublock_size = context.current_vert_render_info.get_size();
+        std::pair<std::uint8_t *, std::size_t> allocated_buffer = context.vertex_info_uniform_buffer.allocate(ublock_size);
+        context.current_vert_render_info.copy_to(allocated_buffer.first);
 
         context.previous_vert_info = vert_ublock;
 
-        glBindBufferRange(GL_UNIFORM_BUFFER, 2, context.vertex_info_uniform_buffer.handle(), allocated_buffer.second, sizeof(shader::RenderVertUniformBlock));
+        glBindBufferRange(GL_UNIFORM_BUFFER, 2, context.vertex_info_uniform_buffer.handle(), allocated_buffer.second, ublock_size);
     }
 
-    shader::RenderFragUniformBlock &frag_ublock = context.current_frag_render_info;
+    shader::RenderFragUniformBlock &frag_ublock = context.current_frag_render_info.base_block;
     const bool both_side_fragment_program_disabled = (context.record.front_side_fragment_program_mode == SCE_GXM_FRAGMENT_PROGRAM_DISABLED)
         && ((context.record.back_side_fragment_program_mode == SCE_GXM_FRAGMENT_PROGRAM_DISABLED) || (context.record.two_sided == SCE_GXM_TWO_SIDED_DISABLED));
     if (both_side_fragment_program_disabled) {
@@ -179,30 +199,39 @@ void draw(GLState &renderer, GLContext &context, const FeatureState &features, S
     else if (!has_msaa && has_downscale)
         frag_ublock.res_multiplier /= 2;
 
-    if (memcmp(&context.previous_frag_info, &frag_ublock, sizeof(shader::RenderFragUniformBlock)) != 0) {
-        std::pair<std::uint8_t *, std::size_t> allocated_buffer = context.fragment_info_uniform_buffer.allocate(sizeof(shader::RenderFragUniformBlock));
-        std::memcpy(allocated_buffer.first, &frag_ublock, sizeof(shader::RenderFragUniformBlock));
+    if (context.current_frag_render_info.changed || memcmp(&context.previous_frag_info, &frag_ublock, sizeof(shader::RenderFragUniformBlock)) != 0) {
+        const uint32_t ublock_size = context.current_frag_render_info.get_size();
+        std::pair<std::uint8_t *, std::size_t> allocated_buffer = context.fragment_info_uniform_buffer.allocate(ublock_size);
+        context.current_frag_render_info.copy_to(allocated_buffer.first);
 
         context.previous_frag_info = frag_ublock;
 
-        glBindBufferRange(GL_UNIFORM_BUFFER, 3, context.fragment_info_uniform_buffer.handle(), allocated_buffer.second, sizeof(shader::RenderFragUniformBlock));
+        glBindBufferRange(GL_UNIFORM_BUFFER, 3, context.fragment_info_uniform_buffer.handle(), allocated_buffer.second, ublock_size);
     }
 
     // Upload vertex stream
-    sync_vertex_streams_and_attributes(context, context.record, mem);
+    sync_vertex_streams_and_attributes(renderer, context, context.record, mem);
 
     // Upload index data.
     const GLsizeiptr index_size = (format == SCE_GXM_INDEX_FORMAT_U16) ? 2 : 4;
     const std::size_t index_buffer_size = index_size * count;
 
-    std::pair<std::uint8_t *, std::size_t> index_gpu_ptr = context.index_stream_ring_buffer.allocate(index_buffer_size);
-    if (!index_gpu_ptr.first) {
-        LOG_ERROR("Failed to allocate index stream ring buffer data from GPU!");
-        return;
-    }
+    std::size_t index_offset;
+    if (renderer.features.enable_memory_mapping) {
+        // the indices are already in a buffer the GPU can read
+        index_offset = renderer.get_matching_offset(indices.address());
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, renderer.guest_memory_buffer[0]);
+    } else {
+        std::pair<std::uint8_t *, std::size_t> index_gpu_ptr = context.index_stream_ring_buffer.allocate(index_buffer_size);
+        if (!index_gpu_ptr.first) {
+            LOG_ERROR("Failed to allocate index stream ring buffer data from GPU!");
+            return;
+        }
 
-    std::memcpy(index_gpu_ptr.first, indices, index_buffer_size);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, context.index_stream_ring_buffer.handle());
+        std::memcpy(index_gpu_ptr.first, indices.get(mem), index_buffer_size);
+        index_offset = index_gpu_ptr.second;
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, context.index_stream_ring_buffer.handle());
+    }
 
     if (fragment_program_gxp.is_native_color()) {
         if (features.should_use_shader_interlock() && !config.spirv_shader) {
@@ -231,9 +260,9 @@ void draw(GLState &renderer, GLContext &context, const FeatureState &features, S
     const GLenum gl_type = format == SCE_GXM_INDEX_FORMAT_U16 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT;
 
     if (instance_count == 1) {
-        glDrawElements(mode, static_cast<GLsizei>(count), gl_type, reinterpret_cast<const void *>(index_gpu_ptr.second));
+        glDrawElements(mode, static_cast<GLsizei>(count), gl_type, reinterpret_cast<const void *>(index_offset));
     } else {
-        glDrawElementsInstanced(mode, static_cast<GLsizei>(count), gl_type, reinterpret_cast<const void *>(index_gpu_ptr.second), instance_count);
+        glDrawElementsInstanced(mode, static_cast<GLsizei>(count), gl_type, reinterpret_cast<const void *>(index_offset), instance_count);
     }
 
     // Restore context for normal draws

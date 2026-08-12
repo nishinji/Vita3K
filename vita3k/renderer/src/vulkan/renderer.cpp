@@ -958,6 +958,8 @@ void VKState::late_init(const Config &cfg, const std::string_view game_id, MemSt
         mapping_method = request_mapping;
 
     features.enable_memory_mapping = mapping_method != MappingMethod::Disabled;
+    // the visibility buffer is written with vulkan queries, so it needs the guest memory mapped
+    support_visibility_buffer = features.enable_memory_mapping;
 
 #ifdef __ANDROID__
     if (mapping_method == MappingMethod::NativeBuffer) {

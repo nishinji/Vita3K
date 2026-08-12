@@ -15,6 +15,7 @@
 // with this program; if not, write to the Free Software Foundation, Inc.,
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
+#include <renderer/gl/state.h>
 #include <renderer/gl/types.h>
 #include <renderer/types.h>
 #include <util/log.h>
@@ -22,9 +23,21 @@
 #include <algorithm>
 
 namespace renderer::gl {
-bool set_uniform_buffer(GLContext &context, const ShaderProgram *program, const bool vertex_shader, const int block_num, const int size, const uint8_t *data) {
+bool set_uniform_buffer(GLState &renderer, GLContext &context, const ShaderProgram *program, const bool vertex_shader, const int block_num, const int size, Ptr<uint8_t> data, const MemState &mem) {
     auto offset = program->uniform_buffer_data_offsets.at(block_num);
     if (offset == static_cast<std::uint32_t>(-1)) {
+        return true;
+    }
+
+    if (renderer.features.enable_memory_mapping) {
+        // The shader reads the buffer where the guest left it, so all it needs is its position in
+        // the guest memory buffer.
+        const uint32_t buffer_offset = renderer.get_matching_offset(data.address());
+        if (vertex_shader)
+            context.current_vert_render_info.set_buffer_address(block_num, buffer_offset);
+        else
+            context.current_frag_render_info.set_buffer_address(block_num, buffer_offset);
+
         return true;
     }
 
@@ -44,7 +57,7 @@ bool set_uniform_buffer(GLContext &context, const ShaderProgram *program, const 
             glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 0, context.vertex_uniform_stream_ring_buffer.handle(), context.vertex_uniform_buffer_storage_ptr.second, program->max_total_uniform_buffer_storage * 4);
         }
 
-        std::memcpy(context.vertex_uniform_buffer_storage_ptr.first + offset_start_upload, data, data_size_upload);
+        std::memcpy(context.vertex_uniform_buffer_storage_ptr.first + offset_start_upload, data.get(mem), data_size_upload);
     } else {
         if (!context.fragment_uniform_buffer_storage_ptr.first) {
             // Allocate a region for it. Don't worry though, when the shader program is changed
@@ -58,7 +71,7 @@ bool set_uniform_buffer(GLContext &context, const ShaderProgram *program, const 
             glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 1, context.fragment_uniform_stream_ring_buffer.handle(), context.fragment_uniform_buffer_storage_ptr.second, program->max_total_uniform_buffer_storage * 4);
         }
 
-        std::memcpy(context.fragment_uniform_buffer_storage_ptr.first + offset_start_upload, data, data_size_upload);
+        std::memcpy(context.fragment_uniform_buffer_storage_ptr.first + offset_start_upload, data.get(mem), data_size_upload);
     }
 
     return true;

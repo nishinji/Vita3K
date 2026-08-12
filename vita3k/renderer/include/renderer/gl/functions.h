@@ -38,7 +38,7 @@ SharedGLObject compile_program(GLState &renderer, GLContext &context, const GxmR
 void pre_compile_program(GLState &renderer, const ShadersHash &hashs);
 
 // Uniforms.
-bool set_uniform_buffer(GLContext &context, const ShaderProgram *program, const bool vertex_shader, const int block_num, const int size, const uint8_t *data);
+bool set_uniform_buffer(GLState &renderer, GLContext &context, const ShaderProgram *program, const bool vertex_shader, const int block_num, const int size, Ptr<uint8_t> data, const MemState &mem);
 
 bool create(std::unique_ptr<renderer::State> &state, const Config &config);
 bool create(std::unique_ptr<Context> &context);
@@ -48,8 +48,10 @@ bool create(std::unique_ptr<VertexProgram> &vp, GLState &state, const SceGxmProg
 void set_context(GLState &state, GLContext &ctx, const MemState &mem, const GLRenderTarget *rt, const FeatureState &features);
 void get_surface_data(GLState &renderer, GLContext &context, uint32_t *pixels, SceGxmColorSurface &surface);
 void lookup_and_get_surface_data(GLState &renderer, MemState &mem, SceGxmColorSurface &surface);
+// Make the guest memory the shaders wrote to visible to the next readers
+void mid_scene_flush();
 void draw(GLState &renderer, GLContext &context, const FeatureState &features, SceGxmPrimitiveType type, SceGxmIndexFormat format,
-    void *indices, size_t count, uint32_t instance_count, MemState &mem, const Config &config);
+    Ptr<const void> indices, size_t count, uint32_t instance_count, MemState &mem, const Config &config);
 
 // State
 void sync_viewport_flat(const GLState &state, GLContext &context);
@@ -69,7 +71,7 @@ void sync_point_line_width(const GLState &state, const std::uint32_t size, const
 void sync_depth_bias(const int factor, const int unit, const bool front);
 void sync_blending(const GxmRecordState &state, const MemState &mem);
 void sync_texture(GLState &state, GLContext &context, MemState &mem, std::size_t index, SceGxmTexture texture, const Config &config);
-void sync_vertex_streams_and_attributes(GLContext &context, GxmRecordState &state, const MemState &mem);
+void sync_vertex_streams_and_attributes(GLState &renderer, GLContext &context, GxmRecordState &state, const MemState &mem);
 void bind_fundamental(GLContext &context);
 void clear_previous_uniform_storage(GLContext &context);
 

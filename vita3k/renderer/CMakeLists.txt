@@ -6,6 +6,7 @@ add_library(
 	src/gl/compile_program.cpp
 	src/gl/draw.cpp
 	src/gl/fence.cpp
+	src/gl/memory_mapping.cpp
 	src/gl/renderer.cpp
 	src/gl/ring_buffer.cpp
 	src/gl/overlay_renderer.cpp

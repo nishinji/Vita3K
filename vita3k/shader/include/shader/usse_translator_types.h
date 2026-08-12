@@ -84,6 +84,10 @@ struct SpirvShaderParameters {
     // when not using buffer device address, contains the storage buffer type
     spv::Id buffer_container;
 
+    // OpenGL with memory mapping: the storage buffer holding all the mapped guest memory. A buffer
+    // address is then a byte offset inside it. 0 when addresses are real pointers (vulkan).
+    spv::Id guest_memory_buffer = 0;
+
     // ids for the given fields in the uniform block container
     int buffer_addresses_id;
     int viewport_ratio_id;

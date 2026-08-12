@@ -112,8 +112,17 @@ void reset_controller_binding(EmuEnvState &emuenv) {
     config::serialize_config(emuenv.cfg, emuenv.cfg.config_path);
 }
 
-int get_supported_memory_mapping_mask(const EmuEnvState &emuenv, int gpu_idx) {
+int get_supported_memory_mapping_mask(const EmuEnvState &emuenv, int gpu_idx, std::string_view backend_renderer) {
     int mask = (1 << 0);
+
+    if (backend_renderer.empty())
+        backend_renderer = emuenv.cfg.current_config.backend_renderer;
+
+    if (backend_renderer == "OpenGL")
+        // the only method opengl has is a persistently mapped buffer installed in the page table.
+        // Whether the driver can actually do it is only known once there is a context, and the
+        // renderer falls back to Disabled if it cannot.
+        return mask | (1 << static_cast<int>(MappingMethod::PageTable));
 
     if (gpu_idx < 0)
         gpu_idx = emuenv.cfg.gpu_idx;

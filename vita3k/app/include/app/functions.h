@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 
 struct Config;
@@ -91,7 +92,9 @@ void reset_last_time_app_used(EmuEnvState &emuenv, const std::string &app_path);
 void delete_app(EmuEnvState &emuenv, const std::string &app_path);
 std::vector<AppEntry> get_apps(const EmuEnvState &emuenv);
 std::map<std::string, AppTime> get_user_app_times(const EmuEnvState &emuenv);
-int get_supported_memory_mapping_mask(const EmuEnvState &emuenv, int gpu_idx = -1);
+// backend_renderer defaults to the one in the config when left empty, pass it explicitly to ask
+// about a backend the user has selected but not applied yet
+int get_supported_memory_mapping_mask(const EmuEnvState &emuenv, int gpu_idx = -1, std::string_view backend_renderer = {});
 void ensure_camera_defaults(Config &cfg);
 std::vector<std::string> get_available_camera_names();
 std::vector<AdhocAddressOption> get_available_adhoc_address_options();

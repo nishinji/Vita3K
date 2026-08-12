@@ -121,7 +121,7 @@ COMMAND_SET_STATE(uniform_buffer) {
 
     switch (renderer.current_backend) {
     case Backend::OpenGL:
-        gl::set_uniform_buffer(*reinterpret_cast<gl::GLContext *>(render_context), program, is_vertex, block_num, size, data.get(mem));
+        gl::set_uniform_buffer(dynamic_cast<gl::GLState &>(renderer), *reinterpret_cast<gl::GLContext *>(render_context), program, is_vertex, block_num, size, data, mem);
         break;
 
     case Backend::Vulkan:

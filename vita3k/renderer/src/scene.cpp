@@ -98,9 +98,9 @@ COMMAND(handle_sync_surface_data) {
 
     const SceGxmNotification vertex_notification = helper.pop<SceGxmNotification>();
     const SceGxmNotification fragment_notification = helper.pop<SceGxmNotification>();
-    // with memory mapping, notifications are signaled another way
+    // the vulkan wait thread signals the notifications itself when memory mapping is on
     // also don't try to signal if there are no notifications
-    bool were_notifications_signaled = renderer.features.enable_memory_mapping
+    bool were_notifications_signaled = (renderer.current_backend == Backend::Vulkan && renderer.features.enable_memory_mapping)
         || (!vertex_notification.address && !fragment_notification.address);
 
     auto signal_notifications = [&]() {
@@ -206,7 +206,12 @@ COMMAND(handle_sync_surface_data) {
 COMMAND(handle_mid_scene_flush) {
     TRACY_FUNC_COMMANDS(handle_mid_scene_flush);
 
-    if (!renderer.features.enable_memory_mapping) {
+    // The mid scene flush only means something to the backend that renders the scene in one go
+    if (renderer.current_backend != Backend::Vulkan || !renderer.features.enable_memory_mapping) {
+        if (renderer.current_backend == Backend::OpenGL && renderer.features.enable_memory_mapping)
+            // the shader stores of this scene may be what the next draws read
+            gl::mid_scene_flush();
+
         // handle it like a simple notification
         cmd_handle_notification(renderer, mem, config, helper, features, render_context);
         return;
@@ -229,7 +234,7 @@ COMMAND(handle_draw) {
     switch (renderer.current_backend) {
     case Backend::OpenGL:
         gl::draw(dynamic_cast<gl::GLState &>(renderer), *reinterpret_cast<gl::GLContext *>(render_context),
-            features, type, format, indices.cast<void>().get(mem), count, instance_count, mem, config);
+            features, type, format, indices, count, instance_count, mem, config);
         break;
 
     case Backend::Vulkan:

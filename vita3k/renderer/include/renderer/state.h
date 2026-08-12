@@ -136,6 +136,10 @@ struct State {
     int supported_mapping_methods_mask = 1;
     MappingMethod mapping_method = MappingMethod::Disabled;
 
+    // Can this backend run the visibility test for real, writing the occlusion results back into
+    // the guest visibility buffer? Only the vulkan backend can, using queries.
+    bool support_visibility_buffer = false;
+
     // used for driver bug workaround
     bool is_adreno_stock = false;
     bool is_adreno_turnip = false;

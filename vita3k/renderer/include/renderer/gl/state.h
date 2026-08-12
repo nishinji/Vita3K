@@ -28,12 +28,24 @@
 #include <chrono>
 #include <condition_variable>
 #include <deque>
+#include <map>
 #include <mutex>
 #include <string_view>
 #include <thread>
 #include <vector>
 
 namespace renderer::gl {
+
+// A range of guest memory that sceGxmMapMemory handed us, living inside the guest memory buffer.
+struct GLMappedMemory {
+    // Byte offset of the region inside the guest memory buffer.
+    uint32_t offset;
+    uint32_t size;
+    // First 4 KiB block and how many were reserved for it, padding included.
+    uint32_t block;
+    uint32_t block_count;
+};
+
 struct GLState : public renderer::State {
     ShaderCache fragment_shader_cache;
     ShaderCache vertex_shader_cache;
@@ -74,6 +86,25 @@ struct GLState : public renderer::State {
     std::deque<ShaderTranslateRequest *> shader_translate_queue;
     bool shader_translate_abort = false;
 
+    // Can this driver back guest memory with a persistently mapped buffer? Decided once, at
+    // creation. features.enable_memory_mapping follows it unless the user turned mapping off.
+    bool support_memory_mapping = false;
+
+    // All the guest memory GXM mapped lives in this single buffer, which is bound as an SSBO so
+    // that the shaders can read any of it. One buffer rather than one per region keeps the whole
+    // thing addressable with a plain 32-bit offset and costs a single binding point.
+    GLObjectArray<1> guest_memory_buffer;
+    // Persistent mapping of guest_memory_buffer, rounded up to the first 4 KiB boundary: the guest
+    // page table works in 4 KiB pages, so every sub-allocation has to be 4 KiB aligned.
+    uint8_t *guest_memory_base = nullptr;
+    // Byte offset of guest_memory_base inside guest_memory_buffer.
+    uint32_t guest_memory_base_offset = 0;
+    // Free ranges of the buffer, as (first 4 KiB block, block count). Kept coalesced.
+    std::map<uint32_t, uint32_t> guest_memory_free_blocks;
+    // Mapped regions keyed by guest address. std::greater so that lower_bound() lands on the
+    // region containing an address rather than on the one after it.
+    std::map<Address, GLMappedMemory, std::greater<Address>> mapped_memories;
+
     bool init() override;
     void cleanup() override;
     void late_init(const Config &cfg, const std::string_view game_id, MemState &mem) override;
@@ -82,12 +113,19 @@ struct GLState : public renderer::State {
         return &texture_cache;
     }
 
+    bool map_memory(MemState &mem, Ptr<void> address, uint32_t size) override;
+    void unmap_memory(MemState &mem, Ptr<void> address) override;
+    // Byte offset of a guest address inside guest_memory_buffer. Returns 0 for an address that is
+    // not mapped: that reads the wrong data, but it stays in bounds.
+    uint32_t get_matching_offset(Address address);
+
     void render_frame(DisplayState &display, const GxmState &gxm, MemState &mem) override;
     void swap_window() override;
     bool set_current() override;
     void done_current() override;
     std::vector<uint32_t> dump_frame(DisplayState &display, uint32_t &width, uint32_t &height) override;
 
+    uint32_t get_features_mask() override;
     int get_supported_filters() override;
     void set_screen_filter(const std::string_view &filter) override;
     int get_max_anisotropic_filtering() override;
@@ -110,6 +148,13 @@ struct GLState : public renderer::State {
 
     void precompile_shader(const ShadersHash &hash) override;
     void preclose_action() override;
+
+private:
+    // Create and persistently map guest_memory_buffer. Called on the first mapped region.
+    bool create_guest_memory_buffer();
+    // First-fit allocation of `size` bytes, 4 KiB aligned. Returns the block index, or -1.
+    int32_t allocate_guest_memory(uint32_t size);
+    void free_guest_memory(uint32_t block, uint32_t block_count);
 };
 
 } // namespace renderer::gl

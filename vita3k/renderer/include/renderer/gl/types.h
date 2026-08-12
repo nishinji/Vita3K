@@ -165,8 +165,9 @@ struct GLContext : public renderer::Context {
     shader::RenderVertUniformBlock previous_vert_info;
     shader::RenderFragUniformBlock previous_frag_info;
 
-    shader::RenderVertUniformBlock current_vert_render_info{};
-    shader::RenderFragUniformBlock current_frag_render_info{};
+    // the recompiler declares these blocks as std140 for opengl, so they have to be laid out that way
+    shader::RenderVertUniformBlockExtended current_vert_render_info{ .std140 = true };
+    shader::RenderFragUniformBlockExtended current_frag_render_info{ .std140 = true };
 
     std::vector<size_t> self_sampling_indices;
 

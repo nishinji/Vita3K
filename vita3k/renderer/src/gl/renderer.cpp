@@ -204,6 +204,10 @@ bool create(std::unique_ptr<State> &state, const Config &config) {
     int total_extensions = 0;
     glGetIntegerv(GL_NUM_EXTENSIONS, &total_extensions);
 
+    // Immutable storage is what makes a persistent mapping possible, and a persistent mapping is
+    // what lets the guest and the GPU share the memory GXM maps.
+    bool support_buffer_storage = false;
+
     std::unordered_map<std::string, bool *> check_extensions = {
         { "GL_ARB_fragment_shader_interlock", &gl_state.features.support_shader_interlock },
         { "GL_ARB_texture_barrier", &gl_state.features.support_texture_barrier },
@@ -211,6 +215,7 @@ bool create(std::unique_ptr<State> &state, const Config &config) {
         { "GL_ARB_gl_spirv", &gl_state.features.spirv_shader },
         { "GL_ARB_get_texture_sub_image", &gl_state.features.support_get_texture_sub_image },
         { "GL_EXT_shader_image_load_formatted", &gl_state.features.support_unknown_format },
+        { "GL_ARB_buffer_storage", &support_buffer_storage },
         // Deliberately not part of FeatureState: this does not change the shaders we generate,
         // so it must not end up in get_features_mask() and invalidate the shader cache.
         { "GL_ARB_parallel_shader_compile", &gl_state.support_parallel_shader_compile },
@@ -263,6 +268,36 @@ bool create(std::unique_ptr<State> &state, const Config &config) {
 
     // set_async_compilation may have run before the extension was probed, so settle it now
     gl_state.set_async_compilation(gl_state.async_compilation_requested);
+
+#ifndef __ANDROID__
+    {
+        // The guest memory buffer is read as an SSBO from both stages. GL 4.3 guarantees storage
+        // blocks in the fragment stage only, so the vertex stage has to be asked about.
+        GLint vertex_storage_blocks = 0;
+        GLint fragment_storage_blocks = 0;
+        glGetIntegerv(GL_MAX_VERTEX_SHADER_STORAGE_BLOCKS, &vertex_storage_blocks);
+        glGetIntegerv(GL_MAX_FRAGMENT_SHADER_STORAGE_BLOCKS, &fragment_storage_blocks);
+
+        gl_state.support_memory_mapping = support_buffer_storage && glBufferStorage != nullptr
+            && vertex_storage_blocks >= 1 && fragment_storage_blocks >= 1;
+    }
+#endif
+
+    if (gl_state.support_memory_mapping) {
+        // Page Table is the only method that makes sense here: a persistently mapped buffer is
+        // memory the guest and the GPU genuinely share, so there is nothing to keep in sync.
+        gl_state.supported_mapping_methods_mask |= (1 << static_cast<int>(MappingMethod::PageTable));
+
+        // The other methods are Vulkan-only, so anything the user picked other than an explicit
+        // "disabled" turns the one method we have on.
+        if (config.current_config.memory_mapping != "disabled")
+            gl_state.mapping_method = MappingMethod::PageTable;
+    } else {
+        LOG_INFO("Your GPU doesn't support memory mapping, shaders will not be able to read arbitrary guest memory.");
+    }
+
+    gl_state.features.enable_memory_mapping = gl_state.mapping_method != MappingMethod::Disabled;
+    LOG_INFO("Using the following memory mapping method: {}", gl_state.features.enable_memory_mapping ? "Page Table" : "Disabled");
 
     // always enabled in the opengl renderer
 #ifdef __ANDROID__
@@ -850,6 +885,30 @@ std::vector<uint32_t> GLState::dump_frame(DisplayState &display, uint32_t &width
     return surface_cache.dump_frame(frame.base, width, height, frame.pitch, res_multiplier, features.support_get_texture_sub_image);
 }
 
+uint32_t GLState::get_features_mask() {
+    // same layout as the vulkan one, so that a bit means the same thing in both backends
+    union {
+        struct {
+            bool use_shader_interlock : 1;
+            bool use_texture_viewport : 1;
+            bool use_memory_mapping : 1;
+            bool use_rgb_attributes : 1;
+            bool use_scaled_attributes : 1;
+        };
+        uint32_t value;
+    } features_mask;
+    static_assert(sizeof(features_mask) == sizeof(uint32_t));
+
+    features_mask.value = 0;
+    features_mask.use_shader_interlock = features.support_shader_interlock;
+    features_mask.use_texture_viewport = features.use_texture_viewport;
+    features_mask.use_memory_mapping = features.enable_memory_mapping;
+    features_mask.use_rgb_attributes = features.support_rgb_attributes;
+    features_mask.use_scaled_attributes = features.support_scaled_attribute_formats;
+
+    return features_mask.value;
+}
+
 int GLState::get_supported_filters() {
     int filters = static_cast<int>(Filter::NEAREST) | static_cast<int>(Filter::BILINEAR)
         | static_cast<int>(Filter::BICUBIC) | static_cast<int>(Filter::FXAA) | static_cast<int>(Filter::SMAA);
@@ -1009,6 +1068,16 @@ void GLState::cleanup() {
     texture_cache.cleanup();
 
     surface_cache.cleanup();
+
+    if (guest_memory_base) {
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, guest_memory_buffer[0]);
+        glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+        guest_memory_base = nullptr;
+    }
+    guest_memory_buffer.cleanup();
+    guest_memory_free_blocks.clear();
+    mapped_memories.clear();
 
     screen_renderer.destroy();
 

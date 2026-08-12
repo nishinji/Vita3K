@@ -324,37 +324,7 @@ void SettingsDialog::load_config() {
     m_ui->disable_surface_sync->setChecked(m_config.disable_surface_sync);
     m_ui->async_pipeline_compilation->setChecked(m_config.async_pipeline_compilation);
 
-    {
-        m_ui->memory_mapping_box->clear();
-
-        struct MappingEntry {
-            const char *label;
-            const char *value;
-            int bit;
-        };
-        static const MappingEntry all_methods[] = {
-            { "Disabled", "disabled", static_cast<int>(MappingMethod::Disabled) },
-            { "Double Buffer", "double-buffer", static_cast<int>(MappingMethod::DoubleBuffer) },
-            { "External Host", "external-host", static_cast<int>(MappingMethod::ExernalHost) },
-            { "Page Table", "page-table", static_cast<int>(MappingMethod::PageTable) },
-            { "Native Buffer", "native-buffer", static_cast<int>(MappingMethod::NativeBuffer) },
-        };
-
-        const int gpu_idx = m_config.gpu_idx;
-        const int mask = app::get_supported_memory_mapping_mask(emuenv, gpu_idx);
-
-        int current_idx = 0;
-        int added = 0;
-        for (const auto &m : all_methods) {
-            if ((1 << m.bit) & mask) {
-                m_ui->memory_mapping_box->addItem(tr(m.label), QString::fromLatin1(m.value));
-                if (m_config.memory_mapping == m.value)
-                    current_idx = added;
-                added++;
-            }
-        }
-        m_ui->memory_mapping_box->setCurrentIndex(current_idx);
-    }
+    // the list depends on the backend, so it is filled in by update_gpu_visibility
 
     m_ui->resolution_upscale->setMinimum(2);
     m_ui->resolution_upscale->setMaximum(32);
@@ -1458,15 +1428,50 @@ void SettingsDialog::update_gpu_visibility() {
     const bool is_vulkan = m_ui->backend_renderer_box->currentText() == QStringLiteral("Vulkan");
 
     const int gpu_idx = m_ui->gpu_device_box->currentIndex();
-    const int mask = app::get_supported_memory_mapping_mask(emuenv, gpu_idx);
-    const bool has_mapping = is_vulkan && (mask > 1);
+    const int mask = app::get_supported_memory_mapping_mask(emuenv, gpu_idx, m_ui->backend_renderer_box->currentText().toStdString());
+    const bool has_mapping = mask > 1;
+
+    {
+        // The methods on offer depend on the backend, so refill the list whenever it changes and
+        // keep whatever the user had picked if it survives.
+        struct MappingEntry {
+            const char *label;
+            const char *value;
+            int bit;
+        };
+        static const MappingEntry all_methods[] = {
+            { "Disabled", "disabled", static_cast<int>(MappingMethod::Disabled) },
+            { "Double Buffer", "double-buffer", static_cast<int>(MappingMethod::DoubleBuffer) },
+            { "External Host", "external-host", static_cast<int>(MappingMethod::ExernalHost) },
+            { "Page Table", "page-table", static_cast<int>(MappingMethod::PageTable) },
+            { "Native Buffer", "native-buffer", static_cast<int>(MappingMethod::NativeBuffer) },
+        };
+
+        const QVariant previous = m_ui->memory_mapping_box->currentData();
+        const std::string wanted = previous.isValid() ? previous.toString().toStdString() : m_config.memory_mapping;
+
+        m_ui->memory_mapping_box->clear();
+
+        int current_idx = 0;
+        int added = 0;
+        for (const auto &m : all_methods) {
+            if ((1 << m.bit) & mask) {
+                m_ui->memory_mapping_box->addItem(tr(m.label), QString::fromLatin1(m.value));
+                if (wanted == m.value)
+                    current_idx = added;
+                added++;
+            }
+        }
+        m_ui->memory_mapping_box->setCurrentIndex(current_idx);
+    }
 
     // Vulkan-only widgets
     m_ui->gb_gpu_device->setVisible(is_vulkan);
     m_ui->gb_renderer_accuracy->setVisible(is_vulkan);
-    m_ui->gb_vulkan_options->setVisible(is_vulkan);
     m_ui->spirv_shader->setVisible(is_vulkan);
 
+    // Both backends can map guest memory, so this one follows the supported methods instead
+    m_ui->gb_memory_options->setVisible(has_mapping);
     m_ui->label_memory_mapping->setVisible(has_mapping);
     m_ui->memory_mapping_box->setVisible(has_mapping);
 

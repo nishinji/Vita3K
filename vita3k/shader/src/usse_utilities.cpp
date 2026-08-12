@@ -649,6 +649,99 @@ static spv::Id make_or_get_buffer_ptr(spv::Builder &b, shader::usse::utils::Spir
     return utils.buffer_address_vec[buffer_utils_idx][is_write];
 }
 
+// OpenGL flavour of buffer_address_access: the guest memory is a single storage buffer of floats,
+// so `offset` is a byte offset inside it and every access is an index rather than a dereference.
+static void guest_memory_access(spv::Builder &b, const SpirvShaderParameters &params, SpirvUtilFunctions &utils, const FeatureState &features, Operand dest, int dest_offset, spv::Id offset, uint32_t component_size, uint32_t nb_components, bool is_buffer_store) {
+    const spv::Id i32 = b.makeIntType(32);
+    const spv::Id f32 = b.makeFloatType(32);
+    const spv::Id zero = b.makeIntConstant(0);
+    const spv::Id four = b.makeIntConstant(4);
+
+    // the caller guarantees 4-byte aligned accesses for 32-bit components, and for the smaller ones
+    // we read the word containing them and cut the interesting bits out afterwards
+    const spv::Id first_index = b.createBinOp(spv::OpSDiv, i32, offset, four);
+
+    // This one buffer holds every mapped region, so an out of bounds write would not be discarded,
+    // it would land on some other region's data. Reads are left alone: they can only return the
+    // wrong value, and the bound costs an instruction on the hot path.
+    spv::Id last_index = 0;
+    if (is_buffer_store) {
+        last_index = b.createArrayLength(params.guest_memory_buffer, 0);
+        last_index = b.createBinOp(spv::OpISub, i32, b.createUnaryOp(spv::OpBitcast, i32, last_index), b.makeIntConstant(1));
+    }
+
+    auto access_word = [&](int word_idx) {
+        spv::Id index = word_idx == 0 ? first_index : b.createBinOp(spv::OpIAdd, i32, first_index, b.makeIntConstant(word_idx));
+        if (is_buffer_store)
+            index = b.createBuiltinCall(i32, utils.std_builtins, GLSLstd450SClamp, { index, zero, last_index });
+        return utils::create_access_chain(b, spv::StorageClassStorageBuffer, params.guest_memory_buffer, { zero, index });
+    };
+
+    if (component_size == sizeof(uint32_t)) {
+        // pack the components back into vectors of at most 4, the way the caller expects them
+        std::vector<spv::Id> loaded_components;
+
+        for (uint32_t component_idx = 0; component_idx < nb_components; component_idx++) {
+            if (is_buffer_store) {
+                const spv::Id data = load(b, params, utils, features, dest, 0b1, dest_offset);
+                b.createStore(data, access_word(static_cast<int>(component_idx)));
+                dest.num += 1;
+                continue;
+            }
+
+            loaded_components.push_back(b.createLoad(access_word(static_cast<int>(component_idx)), spv::NoPrecision));
+
+            if (loaded_components.size() == 4 || component_idx == nb_components - 1) {
+                spv::Id component_vec;
+                if (loaded_components.size() == 1)
+                    component_vec = loaded_components[0];
+                else
+                    component_vec = b.createCompositeConstruct(b.makeVectorType(f32, static_cast<int>(loaded_components.size())), loaded_components);
+
+                store(b, params, utils, features, dest, component_vec, (1 << loaded_components.size()) - 1, dest_offset);
+                dest.num += static_cast<uint16_t>(loaded_components.size());
+                loaded_components.clear();
+            }
+        }
+
+        return;
+    }
+
+    if (is_buffer_store) {
+        LOG_ERROR("non-32 bit buffer store is not implemented! Please report it to the devs.");
+        return;
+    }
+
+    // 8 and 16-bit components: read the containing word and extract the bits at the right offset
+    std::vector<spv::Id> loaded_components;
+
+    for (uint32_t component_idx = 0; component_idx < nb_components; component_idx++) {
+        const spv::Id component_offset = b.createBinOp(spv::OpIAdd, i32, offset, b.makeIntConstant(component_idx * component_size));
+        const spv::Id alignment = b.createBinOp(spv::OpBitwiseAnd, i32, component_offset, b.makeIntConstant(0b11));
+        const spv::Id index = b.createBinOp(spv::OpSDiv, i32, component_offset, four);
+
+        spv::Id loaded = b.createLoad(utils::create_access_chain(b, spv::StorageClassStorageBuffer, params.guest_memory_buffer, { zero, index }), spv::NoPrecision);
+        loaded = b.createUnaryOp(spv::OpBitcast, i32, loaded);
+
+        const spv::Id shift = b.createBinOp(spv::OpShiftLeftLogical, i32, alignment, b.makeIntConstant(3)); // 1 byte = 8 bits
+        loaded = b.createOp(spv::OpBitFieldSExtract, i32, { loaded, shift, b.makeIntConstant(component_size * 8) });
+
+        loaded_components.push_back(loaded);
+
+        if (loaded_components.size() == 4 || component_idx == nb_components - 1) {
+            spv::Id component_vec;
+            if (loaded_components.size() == 1)
+                component_vec = loaded_components[0];
+            else
+                component_vec = b.createCompositeConstruct(b.makeVectorType(i32, static_cast<int>(loaded_components.size())), loaded_components);
+
+            store(b, params, utils, features, dest, component_vec, (1 << loaded_components.size()) - 1, dest_offset);
+            dest.num += component_size;
+            loaded_components.clear();
+        }
+    }
+}
+
 void buffer_address_access(spv::Builder &b, const SpirvShaderParameters &params, SpirvUtilFunctions &utils, const FeatureState &features, Operand dest, int dest_offset, spv::Id addr, uint32_t component_size, uint32_t nb_components, int buffer_idx, bool is_buffer_store) {
     const spv::Id i32 = b.makeIntType(32);
     const spv::Id zero = b.makeIntConstant(0);
@@ -665,6 +758,18 @@ void buffer_address_access(spv::Builder &b, const SpirvShaderParameters &params,
 
     spv::Id buffer_address = utils::create_access_chain(b, spv::StorageClassUniform, params.render_info_id, { b.makeIntConstant(params.buffer_addresses_id), buffer_idx_val });
     buffer_address = b.createLoad(buffer_address, spv::NoPrecision);
+
+    if (params.guest_memory_buffer != 0) {
+        // OpenGL: the host put a byte offset inside the guest memory buffer in the low word, so the
+        // whole address computation stays 32-bit.
+        spv::Id base_offset = b.createCompositeExtract(buffer_address, b.makeUintType(32), 0);
+        base_offset = b.createUnaryOp(spv::OpBitcast, i32, base_offset);
+        base_offset = b.createBinOp(spv::OpIAdd, i32, base_offset, addr);
+
+        guest_memory_access(b, params, utils, features, dest, dest_offset, base_offset, component_size, nb_components, is_buffer_store);
+        return;
+    }
+
     // add the offset from the base address
     buffer_address = add_uvec2_uint(b, buffer_address, addr);
 

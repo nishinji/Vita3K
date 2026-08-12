@@ -31,7 +31,10 @@ namespace shader {
 static constexpr int COLOR_ATTACHMENT_TEXTURE_SLOT_IMAGE = 0;
 static constexpr int MASK_TEXTURE_SLOT_IMAGE = 1;
 static constexpr int COLOR_ATTACHMENT_RAW_TEXTURE_SLOT_IMAGE = 3;
-static constexpr uint32_t CURRENT_VERSION = 13;
+// OpenGL storage buffer binding of the guest memory buffer. Bindings 0 and 1 hold the uniform
+// buffer container, which is not used when memory mapping is on, but keep them clear anyway.
+static constexpr int GUEST_MEMORY_SSBO_BINDING = 2;
+static constexpr uint32_t CURRENT_VERSION = 16;
 // fragment shader using the rendering surface as a storage image (because of shader interlock) have a line
 // layout (constant_id = GAMMA_CORRECTION_SPECIALIZATIO_ID) const bool is_srgb = false;
 // Setting this constant to true performs gamma correction in the shader

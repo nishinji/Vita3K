@@ -448,22 +448,28 @@ void clear_previous_uniform_storage(GLContext &context) {
     context.fragment_uniform_buffer_storage_ptr.second = 0;
 }
 
-void sync_vertex_streams_and_attributes(GLContext &context, GxmRecordState &state, const MemState &mem) {
+void sync_vertex_streams_and_attributes(GLState &renderer, GLContext &context, GxmRecordState &state, const MemState &mem) {
     // Vertex attributes.
     const SceGxmVertexProgram &vertex_program = *state.vertex_program.get(mem);
     GLVertexProgram *glvert = reinterpret_cast<GLVertexProgram *>(vertex_program.renderer_data.get());
 
-    // Each draw will upload the stream data. Assuming that, we can just bind buffer, upload data
+    // With memory mapping the streams already live in a buffer the GPU can read, so they are used
+    // where they are. Otherwise each draw uploads the stream data, and we can just bind the buffer.
     // The GXM submit side should already submit used buffer, but we just delete all just in case
+    const bool use_memory_mapping = renderer.features.enable_memory_mapping;
     std::array<std::size_t, SCE_GXM_MAX_VERTEX_STREAMS> offset_in_buffer;
     for (std::size_t i = 0; i < SCE_GXM_MAX_VERTEX_STREAMS; i++) {
         if (state.vertex_streams[i].data) {
-            std::pair<std::uint8_t *, std::size_t> result = context.vertex_stream_ring_buffer.allocate(state.vertex_streams[i].size);
-            if (!result.first) {
-                LOG_ERROR("Failed to allocate vertex stream data from GPU!");
+            if (use_memory_mapping) {
+                offset_in_buffer[i] = renderer.get_matching_offset(state.vertex_streams[i].data.address());
             } else {
-                std::memcpy(result.first, state.vertex_streams[i].data.get(mem), state.vertex_streams[i].size);
-                offset_in_buffer[i] = result.second;
+                std::pair<std::uint8_t *, std::size_t> result = context.vertex_stream_ring_buffer.allocate(state.vertex_streams[i].size);
+                if (!result.first) {
+                    LOG_ERROR("Failed to allocate vertex stream data from GPU!");
+                } else {
+                    std::memcpy(result.first, state.vertex_streams[i].data.get(mem), state.vertex_streams[i].size);
+                    offset_in_buffer[i] = result.second;
+                }
             }
 
             state.vertex_streams[i].data = nullptr;
@@ -473,7 +479,7 @@ void sync_vertex_streams_and_attributes(GLContext &context, GxmRecordState &stat
         }
     }
 
-    glBindBuffer(GL_ARRAY_BUFFER, context.vertex_stream_ring_buffer.handle());
+    glBindBuffer(GL_ARRAY_BUFFER, use_memory_mapping ? renderer.guest_memory_buffer[0] : context.vertex_stream_ring_buffer.handle());
 
     for (const SceGxmVertexAttribute &attribute : vertex_program.attributes) {
         if (!glvert->attribute_infos.contains(attribute.regIndex))
