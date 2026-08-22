@@ -206,7 +206,15 @@ add_subdirectory(glslang)
 
 option(SPIRV_CROSS_CLI "Build the CLI binary. Requires SPIRV_CROSS_STATIC." OFF)
 option(SPIRV_CROSS_ENABLE_TESTS "Enable SPIRV-Cross tests." OFF)
-option(SPIRV_CROSS_ENABLE_HLSL "Enable HLSL target support." OFF)
+# The DirectX 12 backend translates the recompiler's SPIR-V to HLSL.
+# FORCE is required: existing build trees already cache this as OFF, and a plain
+# option() would leave that stale value in place and drop the spirv-cross-hlsl
+# target the renderer links against.
+if(USE_D3D12)
+	set(SPIRV_CROSS_ENABLE_HLSL ON CACHE BOOL "Enable HLSL target support." FORCE)
+else()
+	option(SPIRV_CROSS_ENABLE_HLSL "Enable HLSL target support." OFF)
+endif()
 option(SPIRV_CROSS_ENABLE_MSL "Enable MSL target support." OFF)
 option(SPIRV_CROSS_ENABLE_CPP "Enable C++ target support." OFF)
 option(SPIRV_CROSS_ENABLE_REFLECT "Enable JSON reflection target support." OFF)

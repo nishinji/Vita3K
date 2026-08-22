@@ -30,6 +30,14 @@
 #include <renderer/gl/types.h>
 #include <renderer/vulkan/functions.h>
 
+#ifdef USE_D3D12
+#include <renderer/d3d12/functions.h>
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+#include <renderer/software/functions.h>
+#endif
+
 #include <gxm/functions.h>
 #include <util/log.h>
 
@@ -242,7 +250,7 @@ void destroy_context(State &state, std::unique_ptr<Context> &context) {
 void destroy_context_during_shutdown(State &state, std::unique_ptr<Context> &context) {
     assert(!state.render_thread);
 
-    if (state.current_backend == Backend::OpenGL) {
+    if (state.current_backend == Backend::OpenGL || state.current_backend == Backend::Software) {
         state.set_current();
     }
 
@@ -274,6 +282,18 @@ void destroy_render_target_during_shutdown(State &state, std::unique_ptr<RenderT
     case Backend::Vulkan:
         vulkan::destroy(dynamic_cast<vulkan::VKState &>(state), rt);
         break;
+
+#ifdef USE_D3D12
+    case Backend::DirectX12:
+        d3d12::destroy(dynamic_cast<d3d12::DXState &>(state), rt);
+        break;
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+    case Backend::Software:
+        software::destroy(dynamic_cast<software::SWState &>(state), rt);
+        break;
+#endif
     }
 
     rt.reset();

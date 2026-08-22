@@ -112,6 +112,17 @@ void reset_controller_binding(EmuEnvState &emuenv) {
     config::serialize_config(emuenv.cfg, emuenv.cfg.config_path);
 }
 
+renderer::VulkanDeviceInfo *ensure_vulkan_device_info(EmuEnvState &emuenv) {
+    // Enumerating Vulkan devices spins up an instance, which loads the GPU
+    // vendor's Vulkan driver and then unloads it again. That is wasted work when
+    // the session never uses Vulkan, so it is deferred until something actually
+    // asks for the device list.
+    if (!emuenv.vulkan_device_info)
+        emuenv.vulkan_device_info = std::make_unique<renderer::VulkanDeviceInfo>(renderer::enumerate_vulkan_devices());
+
+    return emuenv.vulkan_device_info.get();
+}
+
 int get_supported_memory_mapping_mask(const EmuEnvState &emuenv, int gpu_idx) {
     int mask = (1 << 0);
 

@@ -440,6 +440,34 @@ elseif(WIN32)
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${OPENSSL_ROOT_DIR}/bin/libssl-4-x64.dll" "$<TARGET_FILE_DIR:vita3k>"
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${OPENSSL_ROOT_DIR}/bin/libcrypto-4-x64.dll" "$<TARGET_FILE_DIR:vita3k>")
 	endif()
+	if(USE_D3D12)
+		# The DirectX 12 backend loads dxcompiler.dll at runtime to translate
+		# shaders, and DXC needs dxil.dll beside it to sign the DXIL it produces:
+		# D3D12 rejects unsigned shaders unless the machine is in developer mode.
+		# Neither ships with Windows, so both are taken from the SDK.
+		#
+		# They deliberately go in a subdirectory rather than next to the
+		# executable: graphics drivers load their own dxcompiler.dll by name, and
+		# the executable directory comes first in the module search order, so a
+		# copy there gets picked up by the driver instead of its own. The AMD
+		# driver crashes inside D3D12CreateDevice when that happens. DxcLoader
+		# loads it from here by absolute path.
+		get_filename_component(WINDOWS_SDK_BIN "${CMAKE_RC_COMPILER}" DIRECTORY)
+		find_file(DXC_COMPILER_DLL dxcompiler.dll HINTS "${WINDOWS_SDK_BIN}")
+		find_file(DXC_SIGNER_DLL dxil.dll HINTS "${WINDOWS_SDK_BIN}")
+
+		if(DXC_COMPILER_DLL AND DXC_SIGNER_DLL)
+			add_custom_command(
+				TARGET vita3k
+				POST_BUILD
+				COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:vita3k>/dxc"
+				COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DXC_COMPILER_DLL}" "$<TARGET_FILE_DIR:vita3k>/dxc"
+				COMMAND ${CMAKE_COMMAND} -E copy_if_different "${DXC_SIGNER_DLL}" "$<TARGET_FILE_DIR:vita3k>/dxc")
+		else()
+			message(WARNING "dxcompiler.dll / dxil.dll were not found in the Windows SDK; "
+				"the DirectX 12 backend will not be able to compile shaders at runtime.")
+		endif()
+	endif()
 	if(WINDEPLOYQT_EXECUTABLE)
 		add_custom_command(TARGET vita3k POST_BUILD
 			COMMAND "${WINDEPLOYQT_EXECUTABLE}" --no-compiler-runtime --no-opengl-sw --no-patchqt

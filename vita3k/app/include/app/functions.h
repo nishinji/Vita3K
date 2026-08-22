@@ -32,6 +32,10 @@ struct EmuEnvState;
 struct AppLaunchRequest;
 class Root;
 
+namespace renderer {
+struct VulkanDeviceInfo;
+}
+
 namespace app {
 
 struct LaunchRuntimeMetrics {
@@ -91,6 +95,11 @@ void reset_last_time_app_used(EmuEnvState &emuenv, const std::string &app_path);
 void delete_app(EmuEnvState &emuenv, const std::string &app_path);
 std::vector<AppEntry> get_apps(const EmuEnvState &emuenv);
 std::map<std::string, AppTime> get_user_app_times(const EmuEnvState &emuenv);
+// Populates emuenv.vulkan_device_info on first use and returns it. Enumerating
+// Vulkan devices loads the vendor's Vulkan driver, so it is only done when a
+// caller actually needs the device list.
+renderer::VulkanDeviceInfo *ensure_vulkan_device_info(EmuEnvState &emuenv);
+
 int get_supported_memory_mapping_mask(const EmuEnvState &emuenv, int gpu_idx = -1);
 void ensure_camera_defaults(Config &cfg);
 std::vector<std::string> get_available_camera_names();

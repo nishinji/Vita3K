@@ -217,6 +217,18 @@ EXPORT(int, sceAvcdecDecode, SceAvcdecCtrl *decoder, const SceAvcdecAu *au, SceA
     SceAvcdecPicture *pPicture = picture->pPicture.get(emuenv.mem)[0].get(emuenv.mem);
     uint8_t *output = pPicture->frame.pPicture[0].cast<uint8_t>().get(emuenv.mem);
 
+    // TEMPORARY DEBUG INSTRUMENTATION - remove once the video colour issue is found
+    LOG_INFO_ONCE("[VDBG avcdec] pixelType=0x{:X} framePitch={} frame={}x{} hv={}x{} crop L{} R{} T{} B{} "
+                  "es_size={} numOfElm={} pPicture0=0x{:X} pPicture1=0x{:X} opt.alpha={} opt.csc={}",
+        fmt::underlying(pPicture->frame.pixelType), pPicture->frame.framePitch,
+        pPicture->frame.frameWidth, pPicture->frame.frameHeight,
+        pPicture->frame.horizontalSize, pPicture->frame.verticalSize,
+        pPicture->frame.frameCropLeftOffset, pPicture->frame.frameCropRightOffset,
+        pPicture->frame.frameCropTopOffset, pPicture->frame.frameCropBottomOffset,
+        au->es.size, picture->numOfElm,
+        pPicture->frame.pPicture[0].address(), pPicture->frame.pPicture[1].address(),
+        static_cast<int>(pPicture->frame.opt.rgba.alpha), static_cast<int>(pPicture->frame.opt.rgba.cscCoefficient));
+
     if ((pPicture->frame.pixelType & (SCE_AVCDEC_PIXEL_YUV420_RASTER | SCE_AVCDEC_PIXEL_YUV420_PACKED_RASTER)) == 0) {
         LOG_ERROR_ONCE("Avcdec rgba output is not implemented");
         picture->numOfOutput++;

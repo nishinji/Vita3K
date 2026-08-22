@@ -27,6 +27,16 @@
 
 #include <renderer/vulkan/functions.h>
 
+#ifdef USE_D3D12
+#include <renderer/d3d12/functions.h>
+#include <renderer/d3d12/state.h>
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+#include <renderer/software/functions.h>
+#include <renderer/software/state.h>
+#endif
+
 #include <config/state.h>
 #include <util/log.h>
 #include <util/tracy.h>
@@ -87,6 +97,20 @@ COMMAND(handle_set_context) {
         vulkan::set_context(*reinterpret_cast<vulkan::VKContext *>(render_context), mem, reinterpret_cast<vulkan::VKRenderTarget *>(rt), features);
         break;
 
+#ifdef USE_D3D12
+    case Backend::DirectX12:
+        d3d12::set_context(*reinterpret_cast<d3d12::DXContext *>(render_context), mem, reinterpret_cast<d3d12::DXRenderTarget *>(rt), features);
+        break;
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+    case Backend::Software:
+        software::set_context(dynamic_cast<software::SWState &>(renderer),
+            *reinterpret_cast<software::SWContext *>(render_context), mem,
+            reinterpret_cast<software::SWRenderTarget *>(rt));
+        break;
+#endif
+
     default:
         REPORT_MISSING(renderer.current_backend);
         break;
@@ -130,6 +154,14 @@ COMMAND(handle_sync_surface_data) {
         if (context->is_recording)
             context->stop_recording(vertex_notification, fragment_notification);
     }
+
+#ifdef USE_D3D12
+    if (renderer.current_backend == Backend::DirectX12) {
+        d3d12::DXContext *context = reinterpret_cast<d3d12::DXContext *>(render_context);
+        if (context->is_recording)
+            context->stop_recording(vertex_notification, fragment_notification, true);
+    }
+#endif
 
     SceGxmColorSurface *surface = &render_context->record.color_surface;
     if (helper.cmd->status) {
@@ -176,6 +208,17 @@ COMMAND(handle_sync_surface_data) {
 
     case Backend::Vulkan:
         break;
+
+#ifdef USE_D3D12
+    case Backend::DirectX12:
+        break;
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+    case Backend::Software:
+        // Nothing to do: the rasterizer wrote straight into this surface.
+        break;
+#endif
 
     default:
         REPORT_MISSING(renderer.current_backend);
@@ -236,6 +279,21 @@ COMMAND(handle_draw) {
         vulkan::draw(*reinterpret_cast<vulkan::VKContext *>(render_context), type, format, indices.cast<void>(),
             count, instance_count, mem, config);
         break;
+
+#ifdef USE_D3D12
+    case Backend::DirectX12:
+        d3d12::draw(*reinterpret_cast<d3d12::DXContext *>(render_context), type, format, indices.cast<void>(),
+            count, instance_count, mem, config);
+        break;
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+    case Backend::Software:
+        software::draw(dynamic_cast<software::SWState &>(renderer),
+            *reinterpret_cast<software::SWContext *>(render_context), type, format,
+            indices.cast<void>().get(mem), count, instance_count, mem, config);
+        break;
+#endif
 
     default:
         REPORT_MISSING(renderer.current_backend);

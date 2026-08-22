@@ -104,7 +104,9 @@
 #include <QWidgetAction>
 #include <QtResource>
 
+#include <algorithm>
 #include <optional>
+#include <vector>
 
 #if defined(HAVE_X11) || defined(HAVE_WAYLAND)
 #include <qpa/qplatformnativeinterface.h>
@@ -383,7 +385,9 @@ void MainWindow::initialize() {
     emuenv.compat.log_compat_warn = emuenv.cfg.log_compat_warn;
     m_game_compat = new GameCompatibility(emuenv.compat, emuenv.cache_path.native(), this);
 
-    emuenv.vulkan_device_info = std::make_unique<renderer::VulkanDeviceInfo>(renderer::enumerate_vulkan_devices());
+    // The Vulkan device list is populated on demand by app::ensure_vulkan_device_info.
+    // Probing it here would load and then unload the vendor's Vulkan driver on
+    // every start, even for sessions that never touch Vulkan.
 
     init_current_user();
 
@@ -977,7 +981,13 @@ std::optional<AppLaunchRequest> MainWindow::boot_game_once(const AppLaunchReques
         m_game_container = nullptr;
     };
 
-    if (emuenv.backend_renderer == renderer::Backend::OpenGL) {
+    const bool needs_gl_context = (emuenv.backend_renderer == renderer::Backend::OpenGL)
+#ifdef USE_SOFTWARE_RENDERER
+        || (emuenv.backend_renderer == renderer::Backend::Software)
+#endif
+        ;
+
+    if (needs_gl_context) {
         if (!m_game_window->create_gl_context()) {
             abort_boot(tr("Could not create OpenGL context.\nDoes your GPU support at least OpenGL 4.4?"));
             return {};
@@ -1786,7 +1796,22 @@ void MainWindow::setup_status_bar() {
         Config desired;
         copy_config_for_edit(desired, emuenv.cfg);
         auto &cc = desired.current_config;
-        cc.backend_renderer = (cc.backend_renderer == "Vulkan") ? "OpenGL" : "Vulkan";
+        // Cycle through the backends that were actually compiled in.
+        static const std::vector<std::string> backend_cycle = {
+            "Vulkan",
+            "OpenGL",
+#ifdef USE_D3D12
+            "DirectX12",
+#endif
+#ifdef USE_SOFTWARE_RENDERER
+            "Software",
+#endif
+        };
+        const auto current = std::find(backend_cycle.begin(), backend_cycle.end(), cc.backend_renderer);
+        const size_t next_index = (current == backend_cycle.end())
+            ? 0
+            : (static_cast<size_t>(std::distance(backend_cycle.begin(), current)) + 1) % backend_cycle.size();
+        cc.backend_renderer = backend_cycle[next_index];
         desired.backend_renderer = cc.backend_renderer;
         save_config(desired);
         update_renderer_button();
@@ -1797,6 +1822,12 @@ void MainWindow::setup_status_bar() {
         QMenu menu(this);
         auto *vulkan_action = menu.addAction(QStringLiteral("Vulkan"));
         auto *opengl_action = menu.addAction(QStringLiteral("OpenGL"));
+#ifdef USE_D3D12
+        auto *d3d12_action = menu.addAction(QStringLiteral("DirectX12"));
+#endif
+#ifdef USE_SOFTWARE_RENDERER
+        auto *software_action = menu.addAction(QStringLiteral("Software"));
+#endif
         QAction *chosen = menu.exec(m_renderer_button->mapToGlobal(pos));
         if (!chosen)
             return;
@@ -1807,6 +1838,14 @@ void MainWindow::setup_status_bar() {
             cc.backend_renderer = "Vulkan";
         } else if (chosen == opengl_action) {
             cc.backend_renderer = "OpenGL";
+#ifdef USE_D3D12
+        } else if (chosen == d3d12_action) {
+            cc.backend_renderer = "DirectX12";
+#endif
+#ifdef USE_SOFTWARE_RENDERER
+        } else if (chosen == software_action) {
+            cc.backend_renderer = "Software";
+#endif
         }
         desired.backend_renderer = cc.backend_renderer;
         save_config(desired);
@@ -1844,7 +1883,8 @@ void MainWindow::setup_status_bar() {
     sb->addWidget(m_accuracy_button);
 
     auto get_filter_names = [this]() -> QStringList {
-        if (emuenv.cfg.current_config.backend_renderer == "Vulkan")
+        const auto &backend = emuenv.cfg.current_config.backend_renderer;
+        if (backend == "Vulkan" || backend == "DirectX12")
             return { QStringLiteral("Nearest"), QStringLiteral("Bilinear"),
                 QStringLiteral("Bicubic"), QStringLiteral("FXAA"), QStringLiteral("FSR") };
         else
@@ -2001,6 +2041,12 @@ void MainWindow::update_renderer_button() {
     if (renderer == "Vulkan") {
         m_renderer_button->setText(QStringLiteral("VULKAN"));
         update_status_button_accent(m_renderer_button, QStringLiteral("renderer_vulkan"));
+    } else if (renderer == "DirectX12") {
+        m_renderer_button->setText(QStringLiteral("DIRECTX12"));
+        update_status_button_accent(m_renderer_button, QStringLiteral("renderer_directx12"));
+    } else if (renderer == "Software") {
+        m_renderer_button->setText(QStringLiteral("SOFTWARE"));
+        update_status_button_accent(m_renderer_button, QStringLiteral("renderer_software"));
     } else {
         m_renderer_button->setText(QStringLiteral("OPENGL"));
         update_status_button_accent(m_renderer_button, QStringLiteral("renderer_opengl"));
@@ -2022,7 +2068,7 @@ void MainWindow::update_accuracy_button() {
 
 void MainWindow::update_screen_filter_button() {
     auto &cc = emuenv.cfg.current_config;
-    const QStringList valid = (cc.backend_renderer == "Vulkan")
+    const QStringList valid = (cc.backend_renderer == "Vulkan" || cc.backend_renderer == "DirectX12")
         ? QStringList{ QStringLiteral("Nearest"), QStringLiteral("Bilinear"),
               QStringLiteral("Bicubic"), QStringLiteral("FXAA"), QStringLiteral("FSR") }
         : QStringList{ QStringLiteral("Nearest"), QStringLiteral("Bilinear"),

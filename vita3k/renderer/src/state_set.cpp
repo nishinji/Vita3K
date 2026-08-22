@@ -26,7 +26,16 @@
 #include <renderer/gl/types.h>
 
 #include <renderer/vulkan/functions.h>
+
+#ifdef USE_SOFTWARE_RENDERER
+#include <renderer/software/functions.h>
+#endif
 #include <renderer/vulkan/state.h>
+
+#ifdef USE_D3D12
+#include <renderer/d3d12/functions.h>
+#include <renderer/d3d12/state.h>
+#endif
 #include <renderer/vulkan/types.h>
 
 #include <util/align.h>
@@ -69,6 +78,19 @@ COMMAND_SET_STATE(region_clip) {
         vulkan::sync_clipping(*static_cast<vulkan::VKContext *>(render_context));
         break;
 
+#ifdef USE_D3D12
+    case Backend::DirectX12:
+        d3d12::sync_clipping(*static_cast<d3d12::DXContext *>(render_context));
+        break;
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+    case Backend::Software:
+        // Nothing to sync: the rasterizer reads this state straight out of the
+        // record when the draw reaches it.
+        break;
+#endif
+
     default:
         REPORT_MISSING(renderer.current_backend);
         break;
@@ -94,6 +116,18 @@ COMMAND_SET_STATE(program) {
         case Backend::Vulkan:
             break;
 
+#ifdef USE_D3D12
+        case Backend::DirectX12:
+            break;
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+        case Backend::Software:
+            // Nothing to sync: the rasterizer reads this state straight out of the
+            // record when the draw reaches it.
+            break;
+#endif
+
         default:
             REPORT_MISSING(renderer.current_backend);
             break;
@@ -107,6 +141,11 @@ COMMAND_SET_STATE(program) {
     if (renderer.current_backend == Backend::Vulkan) {
         vulkan::refresh_pipeline(*reinterpret_cast<vulkan::VKContext *>(render_context));
     }
+#ifdef USE_D3D12
+    else if (renderer.current_backend == Backend::DirectX12) {
+        d3d12::refresh_pipeline(*reinterpret_cast<d3d12::DXContext *>(render_context));
+    }
+#endif
 }
 
 COMMAND_SET_STATE(uniform_buffer) {
@@ -127,6 +166,18 @@ COMMAND_SET_STATE(uniform_buffer) {
     case Backend::Vulkan:
         vulkan::set_uniform_buffer(*reinterpret_cast<vulkan::VKContext *>(render_context), mem, program, is_vertex, block_num, size, data);
         break;
+
+#ifdef USE_D3D12
+    case Backend::DirectX12:
+        d3d12::set_uniform_buffer(*reinterpret_cast<d3d12::DXContext *>(render_context), mem, program, is_vertex, block_num, size, data);
+        break;
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+    case Backend::Software:
+        software::set_uniform_buffer(*reinterpret_cast<software::SWContext *>(render_context), program, is_vertex, block_num, size, data.get(mem));
+        break;
+#endif
 
     default:
         REPORT_MISSING(renderer.current_backend);
@@ -185,6 +236,18 @@ COMMAND_SET_STATE(viewport) {
             vulkan::sync_viewport_real(*reinterpret_cast<vulkan::VKContext *>(render_context), xOffset, yOffset, zOffset, xScale, yScale, zScale);
             break;
 
+#ifdef USE_D3D12
+        case Backend::DirectX12:
+            d3d12::sync_viewport_real(*reinterpret_cast<d3d12::DXContext *>(render_context), xOffset, yOffset, zOffset, xScale, yScale, zScale);
+            break;
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+        case Backend::Software:
+            software::sync_viewport_real(*reinterpret_cast<software::SWContext *>(render_context), xOffset, yOffset, xScale, yScale);
+            break;
+#endif
+
         default:
             REPORT_MISSING(renderer.current_backend);
             break;
@@ -206,6 +269,19 @@ COMMAND_SET_STATE(viewport) {
             vulkan::sync_viewport_flat(*reinterpret_cast<vulkan::VKContext *>(render_context));
             break;
 
+#ifdef USE_D3D12
+        case Backend::DirectX12:
+            d3d12::sync_viewport_flat(*reinterpret_cast<d3d12::DXContext *>(render_context));
+            break;
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+        case Backend::Software:
+            // Nothing to sync: the rasterizer reads this state straight out of the
+            // record when the draw reaches it.
+            break;
+#endif
+
         default:
             REPORT_MISSING(renderer.current_backend);
             break;
@@ -224,6 +300,20 @@ COMMAND_SET_STATE(viewport) {
             // We need to sync again state that uses the flip
             vulkan::sync_clipping(*reinterpret_cast<vulkan::VKContext *>(render_context));
             break;
+
+#ifdef USE_D3D12
+        case Backend::DirectX12:
+            // We need to sync again state that uses the flip
+            d3d12::sync_clipping(*reinterpret_cast<d3d12::DXContext *>(render_context));
+            break;
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+        case Backend::Software:
+            // Nothing to sync: the rasterizer reads this state straight out of the
+            // record when the draw reaches it.
+            break;
+#endif
 
         default:
             REPORT_MISSING(renderer.current_backend);
@@ -252,6 +342,20 @@ COMMAND_SET_STATE(depth_bias) {
             vulkan::sync_depth_bias(*reinterpret_cast<vulkan::VKContext *>(render_context));
         break;
 
+#ifdef USE_D3D12
+    case Backend::DirectX12:
+        if (is_front)
+            d3d12::sync_depth_bias(*reinterpret_cast<d3d12::DXContext *>(render_context));
+        break;
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+    case Backend::Software:
+        // Nothing to sync: the rasterizer reads this state straight out of the
+        // record when the draw reaches it.
+        break;
+#endif
+
     default:
         REPORT_MISSING(renderer.current_backend);
         break;
@@ -278,6 +382,19 @@ COMMAND_SET_STATE(depth_func) {
         vulkan::refresh_pipeline(*reinterpret_cast<vulkan::VKContext *>(render_context));
         break;
 
+#ifdef USE_D3D12
+    case Backend::DirectX12:
+        d3d12::refresh_pipeline(*reinterpret_cast<d3d12::DXContext *>(render_context));
+        break;
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+    case Backend::Software:
+        // Nothing to sync: the rasterizer reads this state straight out of the
+        // record when the draw reaches it.
+        break;
+#endif
+
     default:
         REPORT_MISSING(renderer.current_backend);
         break;
@@ -303,6 +420,19 @@ COMMAND_SET_STATE(depth_write_enable) {
         vulkan::refresh_pipeline(*reinterpret_cast<vulkan::VKContext *>(render_context));
         break;
 
+#ifdef USE_D3D12
+    case Backend::DirectX12:
+        d3d12::refresh_pipeline(*reinterpret_cast<d3d12::DXContext *>(render_context));
+        break;
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+    case Backend::Software:
+        // Nothing to sync: the rasterizer reads this state straight out of the
+        // record when the draw reaches it.
+        break;
+#endif
+
     default:
         REPORT_MISSING(renderer.current_backend);
         break;
@@ -327,6 +457,19 @@ COMMAND_SET_STATE(polygon_mode) {
         vulkan::refresh_pipeline(*reinterpret_cast<vulkan::VKContext *>(render_context));
         break;
 
+#ifdef USE_D3D12
+    case Backend::DirectX12:
+        d3d12::refresh_pipeline(*reinterpret_cast<d3d12::DXContext *>(render_context));
+        break;
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+    case Backend::Software:
+        // Nothing to sync: the rasterizer reads this state straight out of the
+        // record when the draw reaches it.
+        break;
+#endif
+
     default:
         REPORT_MISSING(renderer.current_backend);
         break;
@@ -348,6 +491,19 @@ COMMAND_SET_STATE(point_line_width) {
     case Backend::Vulkan:
         vulkan::sync_point_line_width(*reinterpret_cast<vulkan::VKContext *>(render_context), is_front);
         break;
+
+#ifdef USE_D3D12
+    case Backend::DirectX12:
+        d3d12::sync_point_line_width(*reinterpret_cast<d3d12::DXContext *>(render_context), is_front);
+        break;
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+    case Backend::Software:
+        // Nothing to sync: the rasterizer reads this state straight out of the
+        // record when the draw reaches it.
+        break;
+#endif
 
     default:
         REPORT_MISSING(renderer.current_backend);
@@ -390,6 +546,20 @@ COMMAND_SET_STATE(stencil_func) {
         vulkan::sync_stencil_func(dynamic_cast<vulkan::VKContext &>(*render_context), !is_front);
         break;
 
+#ifdef USE_D3D12
+    case Backend::DirectX12:
+        d3d12::refresh_pipeline(dynamic_cast<d3d12::DXContext &>(*render_context));
+        d3d12::sync_stencil_func(dynamic_cast<d3d12::DXContext &>(*render_context), !is_front);
+        break;
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+    case Backend::Software:
+        // Nothing to sync: the rasterizer reads this state straight out of the
+        // record when the draw reaches it.
+        break;
+#endif
+
     default:
         REPORT_MISSING(renderer.current_backend);
         break;
@@ -415,6 +585,19 @@ COMMAND_SET_STATE(stencil_ref) {
         vulkan::sync_stencil_func(dynamic_cast<vulkan::VKContext &>(*render_context), !is_front);
         break;
 
+#ifdef USE_D3D12
+    case Backend::DirectX12:
+        d3d12::sync_stencil_func(dynamic_cast<d3d12::DXContext &>(*render_context), !is_front);
+        break;
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+    case Backend::Software:
+        // Nothing to sync: the rasterizer reads this state straight out of the
+        // record when the draw reaches it.
+        break;
+#endif
+
     default:
         REPORT_MISSING(renderer.current_backend);
         break;
@@ -436,6 +619,21 @@ COMMAND_SET_STATE(texture) {
         vulkan::sync_texture(*reinterpret_cast<vulkan::VKContext *>(render_context), mem, texture_index, texture,
             config);
         break;
+
+#ifdef USE_D3D12
+    case Backend::DirectX12:
+        d3d12::sync_texture(*reinterpret_cast<d3d12::DXContext *>(render_context), mem, texture_index, texture,
+            config);
+        break;
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+    case Backend::Software:
+        // The upload happens at draw time, once the shaders say which units
+        // they actually read.
+        software::set_texture(*reinterpret_cast<software::SWContext *>(render_context), texture_index, texture);
+        break;
+#endif
 
     default:
         REPORT_MISSING(renderer.current_backend);
@@ -460,6 +658,22 @@ COMMAND_SET_STATE(two_sided) {
         vulkan::sync_stencil_func(dynamic_cast<vulkan::VKContext &>(*render_context), true);
         break;
 
+#ifdef USE_D3D12
+    case Backend::DirectX12:
+        d3d12::refresh_pipeline(*reinterpret_cast<d3d12::DXContext *>(render_context));
+        d3d12::sync_stencil_func(dynamic_cast<d3d12::DXContext &>(*render_context), false);
+        // this second call is useless if two_sided is disabled
+        d3d12::sync_stencil_func(dynamic_cast<d3d12::DXContext &>(*render_context), true);
+        break;
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+    case Backend::Software:
+        // Nothing to sync: the rasterizer reads this state straight out of the
+        // record when the draw reaches it.
+        break;
+#endif
+
     default:
         REPORT_MISSING(renderer.current_backend);
         break;
@@ -478,6 +692,19 @@ COMMAND_SET_STATE(cull_mode) {
     case Backend::Vulkan:
         vulkan::refresh_pipeline(*reinterpret_cast<vulkan::VKContext *>(render_context));
         break;
+
+#ifdef USE_D3D12
+    case Backend::DirectX12:
+        d3d12::refresh_pipeline(*reinterpret_cast<d3d12::DXContext *>(render_context));
+        break;
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+    case Backend::Software:
+        // Nothing to sync: the rasterizer reads this state straight out of the
+        // record when the draw reaches it.
+        break;
+#endif
 
     default:
         REPORT_MISSING(renderer.current_backend);
@@ -509,6 +736,11 @@ COMMAND_SET_STATE(fragment_program_enable) {
     if (renderer.current_backend == Backend::Vulkan) {
         vulkan::refresh_pipeline(*reinterpret_cast<vulkan::VKContext *>(render_context));
     }
+#ifdef USE_D3D12
+    else if (renderer.current_backend == Backend::DirectX12) {
+        d3d12::refresh_pipeline(*reinterpret_cast<d3d12::DXContext *>(render_context));
+    }
+#endif
 }
 
 COMMAND_SET_STATE(visibility_buffer) {
@@ -519,6 +751,13 @@ COMMAND_SET_STATE(visibility_buffer) {
     if (renderer.current_backend == Backend::Vulkan) {
         vulkan::sync_visibility_buffer(*reinterpret_cast<vulkan::VKContext *>(render_context), buffer, stride);
     }
+#ifdef USE_SOFTWARE_RENDERER
+    else if (renderer.current_backend == Backend::Software) {
+        auto &context = *reinterpret_cast<software::SWContext *>(render_context);
+        context.visibility_buffer = buffer;
+        context.visibility_stride = stride;
+    }
+#endif
 }
 
 COMMAND_SET_STATE(visibility_index) {
@@ -530,6 +769,14 @@ COMMAND_SET_STATE(visibility_index) {
     if (renderer.current_backend == Backend::Vulkan) {
         vulkan::sync_visibility_index(*reinterpret_cast<vulkan::VKContext *>(render_context), enable, index, is_increment);
     }
+#ifdef USE_SOFTWARE_RENDERER
+    else if (renderer.current_backend == Backend::Software) {
+        auto &context = *reinterpret_cast<software::SWContext *>(render_context);
+        context.visibility_enabled = enable;
+        context.visibility_index = index;
+        context.visibility_increment = is_increment;
+    }
+#endif
 }
 
 COMMAND(handle_set_state) {

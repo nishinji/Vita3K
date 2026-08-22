@@ -167,9 +167,20 @@ static overlay::button_states poll_overlay_input(EmuEnvState &emuenv) {
 
 static void set_backend_renderer(EmuEnvState &emuenv, const std::string &backend_renderer) {
 #ifndef __APPLE__
-    emuenv.backend_renderer = (string_utils::toupper(backend_renderer) == "OPENGL")
-        ? renderer::Backend::OpenGL
-        : renderer::Backend::Vulkan;
+    const std::string upper = string_utils::toupper(backend_renderer);
+    if (upper == "OPENGL") {
+        emuenv.backend_renderer = renderer::Backend::OpenGL;
+#ifdef USE_D3D12
+    } else if (upper == "DIRECTX12") {
+        emuenv.backend_renderer = renderer::Backend::DirectX12;
+#endif
+#ifdef USE_SOFTWARE_RENDERER
+    } else if (upper == "SOFTWARE") {
+        emuenv.backend_renderer = renderer::Backend::Software;
+#endif
+    } else {
+        emuenv.backend_renderer = renderer::Backend::Vulkan;
+    }
 #else
     emuenv.backend_renderer = renderer::Backend::Vulkan;
 #endif

@@ -47,6 +47,44 @@ add_library(
 	src/transfer.cpp
 )
 
+if(USE_D3D12)
+	target_sources(renderer PRIVATE
+		src/d3d12/context.cpp
+		src/d3d12/creation.cpp
+		src/d3d12/scene.cpp
+		src/d3d12/gxm_to_d3d12.cpp
+		src/d3d12/overlay_renderer.cpp
+		src/d3d12/pipeline_cache.cpp
+		src/d3d12/renderer.cpp
+		src/d3d12/resource.cpp
+		src/d3d12/screen_renderer.cpp
+		src/d3d12/shader_compile.cpp
+		src/d3d12/surface_cache.cpp
+		src/d3d12/sync_state.cpp
+		src/d3d12/texture.cpp
+	)
+	# d3d12/dxgi/dxguid ship with the Windows SDK; dxcompiler is loaded at
+	# runtime so a missing DXC only disables shader compilation, not the build.
+	target_link_libraries(renderer PRIVATE d3d12 dxgi dxguid)
+	target_link_libraries(renderer PRIVATE spirv-cross-hlsl)
+endif()
+
+if(USE_SOFTWARE_RENDERER)
+	target_sources(renderer PRIVATE
+		src/software/creation.cpp
+		src/software/renderer.cpp
+		src/software/surface_cache.cpp
+		src/software/texture.cpp
+		src/software/spirv_interp.cpp
+		src/software/rasterizer.cpp
+		src/software/draw.cpp
+		src/software/common.cpp
+	)
+	# Only the SPIR-V enums are needed, but the target is what carries the
+	# include directory they live in.
+	target_link_libraries(renderer PRIVATE SPIRV)
+endif()
+
 target_include_directories(renderer PUBLIC include)
 target_link_libraries(renderer PUBLIC display mem stb shader glutil threads config util vkutil overlay)
 target_link_libraries(renderer PRIVATE dialog ddspp SDL3::SDL3 stb ffmpeg xxHash::xxhash concurrentqueue)

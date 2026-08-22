@@ -53,6 +53,29 @@ endif()
 
 option(FORCE_BUILD_OPENSSL_MAC OFF)
 
+# DirectX 12 renderer backend (Windows only)
+if(WIN32)
+	option(USE_D3D12 "Build Vita3K with the DirectX 12 renderer backend" ON)
+else()
+	set(USE_D3D12 OFF)
+endif()
+
+if(USE_D3D12)
+	add_compile_definitions(USE_D3D12)
+endif()
+
+# CPU software renderer backend. It rasterizes on the CPU but still presents
+# through the OpenGL screen renderer, so it follows OpenGL availability.
+if(APPLE)
+	set(USE_SOFTWARE_RENDERER OFF)
+else()
+	option(USE_SOFTWARE_RENDERER "Build Vita3K with the CPU software renderer backend" ON)
+endif()
+
+if(USE_SOFTWARE_RENDERER)
+	add_compile_definitions(USE_SOFTWARE_RENDERER)
+endif()
+
 if("${CMAKE_CXX_COMPILER_LAUNCHER}" STREQUAL "")
 	find_program(CCACHE_PROGRAM ccache)
 	if(CCACHE_PROGRAM)

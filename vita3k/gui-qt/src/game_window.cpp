@@ -63,6 +63,21 @@
 
 namespace {
 
+// The software renderer rasterizes on the CPU but still presents its frames
+// through the OpenGL screen renderer, so it needs the very same surface type
+// and context as the OpenGL backend does.
+bool backend_needs_gl(renderer::Backend backend) {
+    switch (backend) {
+    case renderer::Backend::OpenGL:
+#ifdef USE_SOFTWARE_RENDERER
+    case renderer::Backend::Software:
+#endif
+        return true;
+    default:
+        return false;
+    }
+}
+
 bool set_swap_interval(QOpenGLContext *context, int interval) {
     if (!context) {
         LOG_WARN("Cannot update OpenGL swap interval without a current context");
@@ -137,7 +152,7 @@ GameWindow::GameWindow(EmuEnvState &emuenv, std::shared_ptr<GuiSettings> gui_set
     , m_emuenv(emuenv)
     , m_gui_settings(std::move(gui_settings))
     , m_backend(backend) {
-    if (m_backend == renderer::Backend::OpenGL) {
+    if (backend_needs_gl(m_backend)) {
         setSurfaceType(QSurface::OpenGLSurface);
 
         m_format.setRenderableType(QSurfaceFormat::OpenGL);
@@ -337,7 +352,7 @@ void GameWindow::destroy_render_context() {
 }
 
 void GameWindow::prepare_for_render_thread() {
-    if (m_backend != renderer::Backend::OpenGL || !m_gl_context)
+    if (!backend_needs_gl(m_backend) || !m_gl_context)
         return;
 
     done_current();
@@ -345,7 +360,7 @@ void GameWindow::prepare_for_render_thread() {
 }
 
 void GameWindow::finalize_render_thread_start() {
-    if (m_backend != renderer::Backend::OpenGL || !m_gl_context)
+    if (!backend_needs_gl(m_backend) || !m_gl_context)
         return;
 
     complete_gl_migration();

@@ -294,6 +294,12 @@ void SettingsDialog::load_config() {
     m_ui->backend_renderer_box->addItem(QStringLiteral("OpenGL"));
 #endif
     m_ui->backend_renderer_box->addItem(QStringLiteral("Vulkan"));
+#ifdef USE_D3D12
+    m_ui->backend_renderer_box->addItem(QStringLiteral("DirectX12"));
+#endif
+#ifdef USE_SOFTWARE_RENDERER
+    m_ui->backend_renderer_box->addItem(QStringLiteral("Software"));
+#endif
     {
         const int idx = m_ui->backend_renderer_box->findText(
             QString::fromStdString(m_config.backend_renderer));
@@ -302,8 +308,8 @@ void SettingsDialog::load_config() {
     }
 
     m_ui->gpu_device_box->clear();
-    if (emuenv.vulkan_device_info) {
-        for (const auto &gpu : emuenv.vulkan_device_info->gpu_names)
+    if (const renderer::VulkanDeviceInfo *device_info = app::ensure_vulkan_device_info(emuenv)) {
+        for (const auto &gpu : device_info->gpu_names)
             m_ui->gpu_device_box->addItem(QString::fromStdString(gpu));
     }
 

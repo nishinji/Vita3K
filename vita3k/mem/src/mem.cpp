@@ -325,6 +325,21 @@ bool handle_access_violation(MemState &state, uint8_t *addr, bool write) noexcep
     return true;
 }
 
+void unprotect_for_write(MemState &state, Address addr, uint32_t size) {
+    const std::lock_guard<std::mutex> lock(state.protect_mutex);
+    const Address end = addr + size;
+
+    // The tree is sorted by descending start and segments never overlap, so the walk can stop at the first one ending before addr.
+    auto it = state.protect_tree.upper_bound(end);
+    while (it != state.protect_tree.end() && it->first + it->second.size > addr) {
+        for (auto &[block_addr, block] : it->second.blocks)
+            block.callback(std::max(addr, it->first), true);
+
+        unprotect_inner(state, it->first, it->second.size);
+        it = state.protect_tree.erase(it);
+    }
+}
+
 bool add_protect(MemState &state, Address addr, const uint32_t size, const MemPerm perm, const ProtectCallback &callback) {
     const std::lock_guard<std::mutex> lock(state.protect_mutex);
     ProtectSegmentInfo protect(size, perm);

@@ -27,6 +27,11 @@
 #include <renderer/gl/state.h>
 #include <renderer/vulkan/functions.h>
 #include <renderer/vulkan/state.h>
+
+#ifdef USE_D3D12
+#include <renderer/d3d12/functions.h>
+#include <renderer/d3d12/state.h>
+#endif
 #include <renderer/vulkan/types.h>
 
 #include <renderer/functions.h>
@@ -86,6 +91,14 @@ COMMAND(handle_set_screen_filter) {
     case Backend::Vulkan:
         dynamic_cast<vulkan::VKState &>(renderer).screen_renderer.set_filter(*filter);
         break;
+
+#ifdef USE_D3D12
+    case Backend::DirectX12:
+        // The D3D12 screen renderer takes the filter through the state object,
+        // which is where the supported-filter list is decided too.
+        dynamic_cast<d3d12::DXState &>(renderer).set_screen_filter(*filter);
+        break;
+#endif
     }
 }
 
@@ -103,12 +116,22 @@ COMMAND(new_frame) {
         renderer.should_display = true;
     }
 
+    // The producer always pushes the active context, so every backend that
+    // needs it has to pop it or the command stream desyncs.
     if (renderer.current_backend == Backend::Vulkan) {
         renderer::Context *active_context = helper.pop<renderer::Context *>();
         if (active_context) {
             vulkan::new_frame(*reinterpret_cast<vulkan::VKContext *>(active_context));
         }
     }
+#ifdef USE_D3D12
+    else if (renderer.current_backend == Backend::DirectX12) {
+        renderer::Context *active_context = helper.pop<renderer::Context *>();
+        if (active_context) {
+            d3d12::new_frame(*reinterpret_cast<d3d12::DXContext *>(active_context));
+        }
+    }
+#endif
 }
 
 // Client side function

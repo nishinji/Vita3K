@@ -31,8 +31,23 @@
 
 namespace renderer {
 
+// Each backend keeps its own hash list: the compiled artefacts differ, so a
+// cache written by one must never be picked up by another.
+static const char *shader_cache_suffix(Backend backend) {
+    switch (backend) {
+    case Backend::OpenGL:
+        return "gl";
+    case Backend::DirectX12:
+        return "dx";
+    case Backend::Software:
+        return "sw";
+    default:
+        return "vk";
+    }
+}
+
 bool get_shaders_cache_hashs(State &renderer) {
-    const std::string hash_file_name = fmt::format("hashs-{}.dat", (renderer.current_backend == Backend::OpenGL) ? "gl" : "vk");
+    const std::string hash_file_name = fmt::format("hashs-{}.dat", shader_cache_suffix(renderer.current_backend));
 
     fs::ifstream shaders_hashs(renderer.shaders_path / hash_file_name, std::ios::in | std::ios::binary);
     if (!shaders_hashs.is_open())
@@ -88,7 +103,7 @@ bool get_shaders_cache_hashs(State &renderer) {
 
 void save_shaders_cache_hashs(State &renderer, std::vector<ShadersHash> &shaders_cache_hashs) {
     fs::create_directories(renderer.shaders_path);
-    std::string hash_file_name = fmt::format("hashs-{}.dat", (renderer.current_backend == Backend::OpenGL) ? "gl" : "vk");
+    std::string hash_file_name = fmt::format("hashs-{}.dat", shader_cache_suffix(renderer.current_backend));
     fs::ofstream shaders_hashs(renderer.shaders_path / hash_file_name, std::ios::out | std::ios::binary);
 
     if (shaders_hashs.is_open()) {

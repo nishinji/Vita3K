@@ -531,6 +531,15 @@ void TextureCache::upload_texture(const SceGxmTexture &gxm_texture, MemState &me
             yuv420_texture_to_rgb(yuv_conversion_cache, texture_data_decompressed.data(),
                 static_cast<const uint8_t *>(pixels), pixels_per_stride, memory_height, layout_width, layout_height,
                 base_format == SCE_GXM_TEXTURE_BASE_FORMAT_YUV420P3);
+            // TEMPORARY DEBUG INSTRUMENTATION - remove once the video colour issue is found
+            LOG_INFO_ONCE("[VDBG yuvtex] base_format=0x{:X} swizzle=0x{:X} tex_type=0x{:X} mip_count=0x{:X} "
+                          "size={}x{} stride={} mem_h={} layout={}x{} data=0x{:X}",
+                fmt::underlying(base_format), fmt & SCE_GXM_TEXTURE_SWIZZLE_MASK,
+                fmt::underlying(texture_type), gxm_texture.mip_count,
+                width, height, pixels_per_stride, memory_height, layout_width, layout_height,
+                static_cast<uint32_t>(gxm_texture.data_addr) << 2);
+            renderer::texture::dbg_dump_rgb0_ppm("vdbg_3_yuvtex", texture_data_decompressed.data(),
+                pixels_per_stride, memory_height);
             pixels = texture_data_decompressed.data();
             bpp = 32;
             upload_format = SCE_GXM_TEXTURE_BASE_FORMAT_U8U8U8U8;

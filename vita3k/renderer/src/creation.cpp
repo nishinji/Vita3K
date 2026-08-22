@@ -26,6 +26,16 @@
 #include <renderer/vulkan/functions.h>
 #include <renderer/vulkan/state.h>
 
+#ifdef USE_D3D12
+#include <renderer/d3d12/functions.h>
+#include <renderer/d3d12/state.h>
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+#include <renderer/software/functions.h>
+#include <renderer/software/state.h>
+#endif
+
 #include <gxm/functions.h>
 #include <renderer/functions.h>
 #include <util/align.h>
@@ -65,6 +75,20 @@ COMMAND(handle_create_context) {
         result = vulkan::create(dynamic_cast<vulkan::VKState &>(renderer), *ctx, mem);
         break;
     }
+
+#ifdef USE_D3D12
+    case Backend::DirectX12: {
+        result = d3d12::create(dynamic_cast<d3d12::DXState &>(renderer), *ctx, mem);
+        break;
+    }
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+    case Backend::Software: {
+        result = software::create(dynamic_cast<software::SWState &>(renderer), *ctx, mem);
+        break;
+    }
+#endif
 
     default: {
         REPORT_MISSING(renderer.current_backend);
@@ -112,6 +136,18 @@ COMMAND(handle_create_render_target) {
         result = vulkan::create(dynamic_cast<vulkan::VKState &>(renderer), *render_target, *params, features);
         break;
 
+#ifdef USE_D3D12
+    case Backend::DirectX12:
+        result = d3d12::create(dynamic_cast<d3d12::DXState &>(renderer), *render_target, *params, features);
+        break;
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+    case Backend::Software:
+        result = software::create(dynamic_cast<software::SWState &>(renderer), *render_target, *params, features);
+        break;
+#endif
+
     default:
         REPORT_MISSING(renderer.current_backend);
         break;
@@ -142,6 +178,18 @@ COMMAND(handle_destroy_render_target) {
     case Backend::Vulkan:
         vulkan::destroy(dynamic_cast<vulkan::VKState &>(renderer), *render_target);
         break;
+
+#ifdef USE_D3D12
+    case Backend::DirectX12:
+        d3d12::destroy(dynamic_cast<d3d12::DXState &>(renderer), *render_target);
+        break;
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+    case Backend::Software:
+        software::destroy(dynamic_cast<software::SWState &>(renderer), *render_target);
+        break;
+#endif
 
     default:
         REPORT_MISSING(renderer.current_backend);
@@ -188,6 +236,18 @@ bool create(std::unique_ptr<FragmentProgram> &fp, State &state, const SceGxmProg
         vulkan::create(fp, dynamic_cast<vulkan::VKState &>(state), program, blend);
         break;
 
+#ifdef USE_D3D12
+    case Backend::DirectX12:
+        d3d12::create(fp, dynamic_cast<d3d12::DXState &>(state), program, blend);
+        break;
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+    case Backend::Software:
+        software::create(fp, dynamic_cast<software::SWState &>(state), program, blend);
+        break;
+#endif
+
     default:
         REPORT_MISSING(state.current_backend);
         return false;
@@ -214,6 +274,18 @@ bool create(std::unique_ptr<VertexProgram> &vp, State &state, const SceGxmProgra
     case Backend::Vulkan:
         vulkan::create(vp, dynamic_cast<vulkan::VKState &>(state), program);
         break;
+
+#ifdef USE_D3D12
+    case Backend::DirectX12:
+        d3d12::create(vp, dynamic_cast<d3d12::DXState &>(state), program);
+        break;
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+    case Backend::Software:
+        software::create(vp, dynamic_cast<software::SWState &>(state), program);
+        break;
+#endif
 
     default:
         REPORT_MISSING(state.current_backend);
@@ -271,6 +343,26 @@ bool init(FrameHost &frame, std::unique_ptr<State> &state, Backend backend, cons
         if (!vulkan::create(state, config))
             return false;
         break;
+
+#ifdef USE_D3D12
+    case Backend::DirectX12:
+        state = std::make_unique<d3d12::DXState>(config.current_config.gpu_idx);
+        state->frame = &frame;
+        state->init_paths(root_paths);
+        if (!d3d12::create(state, config))
+            return false;
+        break;
+#endif
+
+#ifdef USE_SOFTWARE_RENDERER
+    case Backend::Software:
+        state = std::make_unique<software::SWState>();
+        state->frame = &frame;
+        state->init_paths(root_paths);
+        if (!software::create(state, config))
+            return false;
+        break;
+#endif
 
     default:
         LOG_ERROR("Cannot create a renderer with unsupported backend {}.", static_cast<int>(backend));
