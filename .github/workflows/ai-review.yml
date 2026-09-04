@@ -1,0 +1,89 @@
+name: AI Review
+
+# pull_request_target is required so that fork pull requests can reach GEMINI_API_KEY.
+# The pull request tree is checked out as data and read by the base branch's script; it is
+# never built, installed or executed, and the checkout carries no credentials.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - '**.md'
+      - 'data/**'
+      - 'docs/**'
+
+  # Comment "/ai-review" on a pull request to review its current head again.
+  issue_comment:
+    types: [created]
+
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number to review
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
+  cancel-in-progress: true
+
+env:
+  PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
+  GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.8-flash' }}
+  # Tried in order when the preferred model answers 503; the newest model is the busiest one.
+  GEMINI_FALLBACK_MODELS: ${{ vars.GEMINI_FALLBACK_MODELS || 'gemini-3.7-flash,gemini-3.5-flash,gemini-3.5-flash-lite' }}
+  GEMINI_THINKING_LEVEL: ${{ vars.GEMINI_THINKING_LEVEL || 'high' }}
+  # Thinking tokens are billed and emitted as output, so a high thinking level needs headroom.
+  GEMINI_MAX_OUTPUT_TOKENS: ${{ vars.GEMINI_MAX_OUTPUT_TOKENS || '32768' }}
+  AI_REVIEW_MAX_CONTEXT_CHARS: ${{ vars.AI_REVIEW_MAX_CONTEXT_CHARS || '400000' }}
+  AI_REVIEW_MAX_FILES: ${{ vars.AI_REVIEW_MAX_FILES || '60' }}
+
+jobs:
+  review:
+    name: Gemini Review
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'issue_comment'
+          && github.event.issue.pull_request
+          && startsWith(github.event.comment.body, '/ai-review')
+          && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
+      || (github.event_name == 'pull_request_target'
+          && github.event.pull_request.draft == false
+          && !contains(github.event.pull_request.labels.*.name, 'no-ai-review'))
+
+    steps:
+      # The run is not a check on the pull request, so acknowledge the request where it was made.
+      - name: React to the request
+        if: github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api -X POST \
+            "repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
+            -f content=eyes
+
+      - name: Checkout reviewer (base branch, trusted)
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/scripts
+
+      - name: Checkout pull request (read only)
+        uses: actions/checkout@v7
+        with:
+          ref: refs/pull/${{ env.PR_NUMBER }}/head
+          path: pr
+          persist-credentials: false
+
+      - name: Review
+        working-directory: .github/scripts
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_ROOT: ${{ github.workspace }}/pr
+        run: python3 -m ai_review
