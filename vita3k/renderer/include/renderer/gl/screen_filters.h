@@ -119,8 +119,24 @@ protected:
     GLuint create_sampler() override;
     void set_uniforms(const SceFVector2 &texture_size) override;
 
+private:
+    // FXAA has to look at the texels the frame was rendered with, so the pass runs into
+    // this target at the source resolution instead of straight to the screen
+    GLuint antialiased_texture{ 0 };
+    GLuint fbo{ 0 };
+    GLsizei target_width{ 0 };
+    GLsizei target_height{ 0 };
+
+    // (re)creates the offscreen target when the source resolution changes
+    void resize_target(GLsizei width, GLsizei height);
+
 public:
     using SinglePassScreenFilter::SinglePassScreenFilter;
+
+    bool init(const fs::path &static_assets) override;
+    void destroy() override;
+    void render(GLuint texture, const SceFVector2 &texture_size, const float *uvs,
+        const SceFVector2 &viewport_pos, const SceFVector2 &viewport_size, GLuint default_fbo) override;
 
     std::string_view get_name() const override {
         return "FXAA";
