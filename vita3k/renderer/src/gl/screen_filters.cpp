@@ -112,6 +112,83 @@ void FXAAScreenFilter::set_uniforms(const SceFVector2 &texture_size) {
     glUniform2f(inv_screen_location, 1 / texture_size.x, 1 / texture_size.y);
 }
 
+bool FXAAScreenFilter::init(const fs::path &static_assets) {
+    if (!SinglePassScreenFilter::init(static_assets))
+        return false;
+
+    glGenFramebuffers(1, &fbo);
+    glGenTextures(1, &antialiased_texture);
+
+    return true;
+}
+
+void FXAAScreenFilter::destroy() {
+    glDeleteFramebuffers(1, &fbo);
+    fbo = 0;
+
+    glDeleteTextures(1, &antialiased_texture);
+    antialiased_texture = 0;
+
+    target_width = 0;
+    target_height = 0;
+
+    SinglePassScreenFilter::destroy();
+}
+
+void FXAAScreenFilter::resize_target(GLsizei width, GLsizei height) {
+    if (width == target_width && height == target_height)
+        return;
+
+    glBindTexture(GL_TEXTURE_2D, antialiased_texture);
+    // the target is blitted, never sampled
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, antialiased_texture, 0);
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        LOG_ERROR("Incomplete FXAA framebuffer ({}x{})", width, height);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    target_width = width;
+    target_height = height;
+}
+
+void FXAAScreenFilter::render(GLuint texture, const SceFVector2 &texture_size, const float *uvs,
+    const SceFVector2 &viewport_pos, const SceFVector2 &viewport_size, GLuint default_fbo) {
+    const auto width = static_cast<GLsizei>(texture_size.x);
+    const auto height = static_cast<GLsizei>(texture_size.y);
+    resize_target(width, height);
+
+    // pass 1: antialias the displayed region at the resolution it was rendered at
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glViewport(0, 0, width, height);
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    glUseProgram(*program);
+    screen.bind_screen_quad(uvs);
+    screen.setup_vertex_attributes(*program);
+    set_uniforms(texture_size);
+
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glBindSampler(0, sampler);
+    glDrawArrays(GL_TRIANGLE_FAN, 0, ScreenRenderer::screen_vertex_count);
+
+    // pass 2: bring the result to the screen without filtering what FXAA just resolved
+    screen.begin_screen_pass(viewport_pos, viewport_size, default_fbo);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
+    glBlitFramebuffer(0, 0, width, height,
+        static_cast<GLint>(viewport_pos.x), static_cast<GLint>(viewport_pos.y),
+        static_cast<GLint>(viewport_pos.x + viewport_size.x),
+        static_cast<GLint>(viewport_pos.y + viewport_size.y),
+        GL_COLOR_BUFFER_BIT, GL_NEAREST);
+}
+
 //
 // SMAA
 //
