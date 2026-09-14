@@ -24,8 +24,13 @@
 #include <codecvt>
 #include <locale>
 #include <ranges>
+#include <string_view>
 
 namespace string_utils {
+
+using namespace std::string_view_literals;
+
+constexpr auto path_special_chars = R"(/\:?"<>|*)"sv;
 
 std::wstring utf_to_wide(const std::string &str) {
     std::wstring_convert<std::codecvt_utf8<wchar_t>> myconv;
@@ -47,23 +52,7 @@ std::string trim_copy(std::string_view str) {
 }
 
 std::string remove_special_chars(std::string str) {
-    for (char &c : str) {
-        switch (c) {
-        case '/':
-        case '\\':
-        case ':':
-        case '?':
-        case '"':
-        case '<':
-        case '>':
-        case '|':
-        case '*':
-            c = '_';
-            break;
-        default:
-            continue;
-        }
-    }
+    std::ranges::replace_if(str, [](char c) { return path_special_chars.contains(c); }, '_');
     return str;
 }
 
@@ -85,9 +74,10 @@ std::vector<uint8_t> string_to_byte_array(std::string_view string) {
 
     std::vector<uint8_t> hex_bytes;
     hex_bytes.reserve(string.length() / 2);
-    for (const char *p = string.data(); p < std::to_address(string.end()); p += 2) {
+    for (size_t i = 0; i < string.length(); i += 2) {
+        const auto hex = string.substr(i, 2);
         uint8_t byte = 0;
-        std::from_chars(p, p + 2, byte, 16);
+        std::from_chars(hex.data(), hex.data() + hex.size(), byte, 16);
         hex_bytes.push_back(byte);
     }
     return hex_bytes;
@@ -122,21 +112,21 @@ std::u16string utf8_to_utf16(const std::string &str) {
 #endif
 
 std::string toupper(std::string s) {
-    std::ranges::transform(s, s.begin(), [](unsigned char c) { return std::toupper(c); });
+    std::ranges::transform(s, s.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
     return s;
 }
 
 std::string tolower(std::string s) {
-    std::ranges::transform(s, s.begin(), [](unsigned char c) { return std::tolower(c); });
+    std::ranges::transform(s, s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return s;
 }
 
 int stoi_def(const std::string &str, int default_value, const char *name) {
     try {
         return std::stoi(str);
-    } catch (std::invalid_argument &_) {
+    } catch (const std::invalid_argument &) {
         LOG_ERROR("Invalid {}: \"{}\"", name, str);
-    } catch (std::out_of_range &_) {
+    } catch (const std::out_of_range &) {
         LOG_ERROR("Out of range {}: \"{}\"", name, str);
     }
     return default_value;

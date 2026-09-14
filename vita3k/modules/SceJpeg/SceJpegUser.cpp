@@ -24,7 +24,7 @@
 #include <util/tracy.h>
 TRACY_MODULE_NAME(SceJpegUser);
 
-typedef std::shared_ptr<MjpegDecoderState> DecoderPtr;
+using DecoderPtr = std::shared_ptr<MjpegDecoderState>;
 
 struct MJpegState {
     bool initialized = false;

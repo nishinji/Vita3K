@@ -31,10 +31,25 @@
 #include <netinet/in.h>
 #endif
 
+#include <algorithm>
+#include <array>
+#include <cctype>
+#include <charconv>
 #include <condition_variable>
+#include <cstddef>
+#include <iterator>
+#include <memory>
 #include <mutex>
+#include <ranges>
+#include <utility>
 
 namespace net_utils {
+
+using namespace std::string_view_literals;
+
+static bool is_digit(char c) {
+    return std::isdigit(static_cast<unsigned char>(c)) != 0;
+}
 
 // 0 is ok, negative is bad
 SceHttpErrorCode parse_url(const std::string &url, parsedUrl &out) {
@@ -43,16 +58,10 @@ SceHttpErrorCode parse_url(const std::string &url, parsedUrl &out) {
     if (out.scheme != "http" && out.scheme != "https")
         return SCE_HTTP_ERROR_UNKNOWN_SCHEME;
 
-    // Check if URL is opaque, if it is opaque then its invalid
-    // http://
-    //+    012
-    //      ^^ Check these 2
-    char url1Slash = *(url.c_str() + (out.scheme.length() + 1)); // get uint8 value
-    char url2Slash = *(url.c_str() + (out.scheme.length() + 2)); // get next uint8 value
-    // Compare the 2 characters that are supposed to be slahses
-    if (url1Slash != '/' || url2Slash != '/') {
+    // An opaque URL (no "://" after the scheme) is invalid
+    if (!std::string_view(url).substr(out.scheme.length()).starts_with("://")) {
         out.invalid = true;
-        return (SceHttpErrorCode)0;
+        return SceHttpErrorCode{};
     }
 
     auto end_scheme_pos = url.find(':');
@@ -64,7 +73,7 @@ SceHttpErrorCode parse_url(const std::string &url, parsedUrl &out) {
         // username:password@lttstore.com:727/wysi/cookie.php?pog=gers#extremeexploit
 
         {
-            auto path_pos = std::string(full_wo_scheme).find('/');
+            auto path_pos = full_wo_scheme.find('/');
             auto full_no_scheme_path = full_wo_scheme.substr(0, path_pos);
             // full_no_scheme_path = username:password@lttstore.com:727
             auto c = full_no_scheme_path.find('@');
@@ -103,7 +112,7 @@ SceHttpErrorCode parse_url(const std::string &url, parsedUrl &out) {
             }
         }
         {
-            auto path_pos = std::string(full_wo_scheme).find('/');
+            auto path_pos = full_wo_scheme.find('/');
             auto full_no_scheme_hostname = full_wo_scheme.substr(path_pos);
             // /wysi/cookie.php?pog=gers#extremeexploit
 
@@ -179,95 +188,74 @@ SceHttpErrorCode parse_url(const std::string &url, parsedUrl &out) {
         }
     }
 
-    return (SceHttpErrorCode)0;
+    return SceHttpErrorCode{};
 }
 
+// Indices must stay in sync with SceHttpMethods
+constexpr std::array method_names{
+    "GET"sv, "POST"sv, "HEAD"sv, "OPTIONS"sv, "PUT"sv, "DELETE"sv, "TRACE"sv, "CONNECT"sv
+};
+
 int char_method_to_int(const char *method) {
-    if (strcmp(method, "GET") == 0) {
-        return SCE_HTTP_METHOD_GET;
-    } else if (strcmp(method, "POST") == 0) {
-        return SCE_HTTP_METHOD_POST;
-    } else if (strcmp(method, "HEAD") == 0) {
-        return SCE_HTTP_METHOD_HEAD;
-    } else if (strcmp(method, "OPTIONS") == 0) {
-        return SCE_HTTP_METHOD_OPTIONS;
-    } else if (strcmp(method, "PUT") == 0) {
-        return SCE_HTTP_METHOD_PUT;
-    } else if (strcmp(method, "DELETE") == 0) {
-        return SCE_HTTP_METHOD_DELETE;
-    } else if (strcmp(method, "TRACE") == 0) {
-        return SCE_HTTP_METHOD_TRACE;
-    } else if (strcmp(method, "CONNECT") == 0) {
-        return SCE_HTTP_METHOD_CONNECT;
-    } else {
+    if (!method)
         return -1;
-    }
+
+    const auto it = std::ranges::find(method_names, std::string_view(method));
+    if (it == method_names.end())
+        return -1;
+
+    return static_cast<int>(std::ranges::distance(method_names.begin(), it));
 }
 
 const char *int_method_to_char(const int n) {
-    switch (n) {
-    case 0: return "GET";
-    case 1: return "POST";
-    case 2: return "HEAD";
-    case 3: return "OPTIONS";
-    case 4: return "PUT";
-    case 5: return "DELETE";
-    case 6: return "TRACE";
-    case 7: return "CONNECT";
-
-    default:
+    if (n < 0 || std::cmp_greater_equal(n, method_names.size()))
         return "INVALID";
-        break;
-    }
+
+    return method_names[static_cast<size_t>(n)].data();
 }
 
 std::string constructHeaders(const HeadersMapType &headers) {
     std::string headersString;
-    for (const auto &head : headers) {
-        headersString.append(head.first);
-        headersString.append(": ");
-        headersString.append(head.second);
-        headersString.append("\r\n");
-    }
+    for (const auto &[name, value] : headers)
+        fmt::format_to(std::back_inserter(headersString), "{}: {}\r\n", name, value);
 
     return headersString;
 }
 
-bool parseStatusLine(const std::string &line, std::string &httpVer, int &statusCode, std::string &reason) {
-    auto lineClean = line.substr(0, line.find("\r\n"));
+bool parseStatusLine(std::string_view line, std::string &httpVer, int &statusCode, std::string &reason) {
+    constexpr auto version_prefix = "HTTP/"sv;
 
-    // do this check just in case the server is drunk or retarded, would be nice to do more checks with some regex
-    if (!lineClean.starts_with("HTTP/"))
+    const auto lineClean = line.substr(0, line.find("\r\n"sv));
+
+    // do this check just in case the server is drunk, would be nice to do more checks with some regex
+    if (!lineClean.starts_with(version_prefix))
         return false; // what
 
     const auto firstSpace = lineClean.find(' ');
-    if (firstSpace == std::string::npos)
+    if (firstSpace == std::string_view::npos)
         return false;
 
-    const std::string fullHttpVerStr = lineClean.substr(0, firstSpace);
-    const std::string httpVerStr = fullHttpVerStr.substr(strlen("HTTP/"));
+    const auto fullHttpVerStr = lineClean.substr(0, firstSpace);
+    const auto httpVerStr = fullHttpVerStr.substr(version_prefix.length());
 
-    if (!std::isdigit(httpVerStr[0]))
+    if (httpVerStr.empty() || !is_digit(httpVerStr.front()))
         return false;
 
-    if (lineClean.length() < fullHttpVerStr.length() + strlen(" XXX"))
-        return false; // the rest of the line is less than 3 characters in length, what the fuck happened also abort
+    if (lineClean.length() < fullHttpVerStr.length() + " XXX"sv.length())
+        return false; // the rest of the line is less than 3 characters in length, abort
 
     const auto codeAndReason = lineClean.substr(firstSpace + 1);
     const auto statusCodeStr = codeAndReason.substr(0, 3);
-    if (!std::isdigit(statusCodeStr[0]) || !std::isdigit(statusCodeStr[1]) || !std::isdigit(statusCodeStr[2]))
+    if (!std::ranges::all_of(statusCodeStr, is_digit))
         return false; // status code contains non digit characters, abort
 
-    const int statusCodeInt = std::stoi(statusCodeStr);
-
-    std::string reasonStr = "";
-    bool hasReason = codeAndReason.find(' ') != std::string::npos;
-    if (hasReason) // standard says that reasons CAN be empty, we have to take this edge case into account
-        reasonStr = codeAndReason.substr(4);
+    int statusCodeInt = 0;
+    std::from_chars(statusCodeStr.data(), statusCodeStr.data() + statusCodeStr.size(), statusCodeInt);
 
     httpVer = httpVerStr;
     statusCode = statusCodeInt;
-    reason = reasonStr;
+    // standard says that reasons CAN be empty, we have to take this edge case into account
+    reason = codeAndReason.contains(' ') ? std::string(codeAndReason.substr(4)) : std::string();
 
     return true;
 }
@@ -275,45 +263,40 @@ bool parseStatusLine(const std::string &line, std::string &httpVer, int &statusC
 /*
     CANNOT have ANYTHING after the last \r\n or \r\n\r\n else it will be treated as a header
 */
-bool parseHeaders(std::string &headersRaw, HeadersMapType &headersOut) {
-    char *ptr = strtok(headersRaw.data(), "\r\n");
-    // use while loop to check ptr is not null
-    while (ptr != NULL) {
-        auto line = std::string_view(ptr);
+bool parseHeaders(std::string_view headersRaw, HeadersMapType &headersOut) {
+    for (const auto raw_line : std::views::split(headersRaw, '\n')) {
+        std::string_view line(raw_line);
+        if (line.ends_with('\r'))
+            line.remove_suffix(1);
+        if (line.empty())
+            continue;
 
-        if (line.find(':') == std::string::npos)
+        const auto separator = line.find(':');
+        if (separator == std::string_view::npos)
             return false; // separator is missing, the header is invalid
 
-        auto name = line.substr(0, line.find(':'));
-        int valueStart = name.length() + 1;
-        if (line.find(": ") != std::string_view::npos)
-            // Theres a space between semicolon and value, trim it
-            valueStart++;
+        const auto name = line.substr(0, separator);
+        auto value = line.substr(separator + 1);
+        if (value.starts_with(' '))
+            value.remove_prefix(1);
 
-        auto value = line.substr(valueStart);
-
-        headersOut.emplace(std::string(name), std::string(value));
-        ptr = strtok(nullptr, "\r\n");
+        headersOut.emplace(name, value);
     }
     return true;
 }
 
 bool parseResponse(const std::string &res, SceRequestResponse &reqres) {
-    auto statusLine = res.substr(0, res.find("\r\n"));
-    if (!parseStatusLine(statusLine, reqres.httpVer, reqres.statusCode, reqres.reasonPhrase))
+    const std::string_view response(res);
+    const auto statusLineEnd = response.find("\r\n"sv);
+    if (!parseStatusLine(response.substr(0, statusLineEnd), reqres.httpVer, reqres.statusCode, reqres.reasonPhrase))
         return false;
 
-    auto headersRaw = res.substr(res.find("\r\n") + strlen("\r\n"), res.find("\r\n\r\n"));
-
-    if (!parseHeaders(headersRaw, reqres.headers))
+    const auto headersStart = statusLineEnd == std::string_view::npos ? response.size() : statusLineEnd + 2;
+    if (!parseHeaders(response.substr(headersStart), reqres.headers))
         return false;
 
-    auto contLenIt = reqres.headers.find("Content-Length");
-    if (contLenIt == reqres.headers.end()) {
-        reqres.contentLength = 0;
-    } else {
-        reqres.contentLength = std::stoi(contLenIt->second);
-    }
+    const auto contLenIt = reqres.headers.find("Content-Length");
+    reqres.contentLength = contLenIt == reqres.headers.end() ? 0 : std::stoi(contLenIt->second);
 
     return true;
 }
@@ -350,7 +333,7 @@ std::string get_web_response(const std::string &url) {
 
     std::string response_string;
     const auto writeFunc = +[](void *ptr, size_t size, size_t nmemb, std::string *data) {
-        data->append((char *)ptr, size * nmemb);
+        data->append(static_cast<const char *>(ptr), size * nmemb);
         return size * nmemb;
     };
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeFunc);
@@ -396,72 +379,56 @@ std::vector<AssignedAddr> get_all_assigned_addrs() {
     };
 
 #ifdef _WIN32
-    PIP_ADAPTER_INFO pAdapterInfo;
-    DWORD dwRetVal = 0;
-    UINT i;
-    ULONG ulOutBufLen = sizeof(IP_ADAPTER_INFO);
-    pAdapterInfo = (IP_ADAPTER_INFO *)malloc(sizeof(IP_ADAPTER_INFO));
-    if (pAdapterInfo == NULL) {
-        LOG_CRITICAL("Error allocating memory needed to call GetAdaptersinfo");
+    std::vector<std::byte> buffer(sizeof(IP_ADAPTER_INFO));
+    auto adapter_info = [&] { return reinterpret_cast<PIP_ADAPTER_INFO>(buffer.data()); };
+
+    // Make an initial call to GetAdaptersInfo to get the necessary size into out_buf_len
+    ULONG out_buf_len = static_cast<ULONG>(buffer.size());
+    if (GetAdaptersInfo(adapter_info(), &out_buf_len) == ERROR_BUFFER_OVERFLOW)
+        buffer.resize(out_buf_len);
+
+    const DWORD ret_val = GetAdaptersInfo(adapter_info(), &out_buf_len);
+    if (ret_val != NO_ERROR) {
+        LOG_CRITICAL("GetAdaptersInfo failed with error: {}", ret_val);
         return ret_addrs();
     }
-    // Make an initial call to GetAdaptersInfo to get the necessary size into the ulOutBufLen variable
-    if (GetAdaptersInfo(pAdapterInfo, &ulOutBufLen) == ERROR_BUFFER_OVERFLOW) {
-        free(pAdapterInfo);
-        pAdapterInfo = (IP_ADAPTER_INFO *)malloc(ulOutBufLen);
-        if (pAdapterInfo == NULL) {
-            LOG_CRITICAL("Error allocating memory needed to call GetAdaptersinfo");
-            return ret_addrs();
+
+    for (auto adapter = adapter_info(); adapter; adapter = adapter->Next) {
+        for (auto ip_addr = &adapter->IpAddressList; ip_addr; ip_addr = ip_addr->Next) {
+            if (std::string_view(ip_addr->IpAddress.String) != "0.0.0.0"sv)
+                out_addrs.push_back({ adapter->Description, ip_addr->IpAddress.String, ip_addr->IpMask.String });
         }
-    }
-    if ((dwRetVal = GetAdaptersInfo(pAdapterInfo, &ulOutBufLen)) == NO_ERROR) {
-        PIP_ADAPTER_INFO pAdapter = pAdapterInfo;
-        const std::string noAddress = "0.0.0.0";
-        while (pAdapter) {
-            IP_ADDR_STRING *pIPAddr = &pAdapter->IpAddressList;
-            while (pIPAddr) {
-                if (noAddress.compare(pIPAddr->IpAddress.String) != 0)
-                    out_addrs.push_back({ pAdapter->Description, pIPAddr->IpAddress.String, pIPAddr->IpMask.String });
-                pIPAddr = pIPAddr->Next;
-            }
-            pAdapter = pAdapter->Next;
-        }
-    } else {
-        LOG_CRITICAL("GetAdaptersInfo failed with error: {}", dwRetVal);
     }
 #else
-    struct ifaddrs *ifAddrStruct = NULL;
-    struct ifaddrs *ifa = NULL;
-    void *tmpAddrPtr = NULL;
+    ifaddrs *if_addrs = nullptr;
+    if (getifaddrs(&if_addrs) != 0)
+        return ret_addrs();
 
-    getifaddrs(&ifAddrStruct);
+    const std::unique_ptr<ifaddrs, decltype(&freeifaddrs)> if_addrs_owner(if_addrs, &freeifaddrs);
 
-    for (ifa = ifAddrStruct; ifa != NULL; ifa = ifa->ifa_next) {
-        if (!ifa->ifa_addr)
+    for (const ifaddrs *ifa = if_addrs; ifa; ifa = ifa->ifa_next) {
+        if (!ifa->ifa_addr || !ifa->ifa_netmask || (ifa->ifa_flags & IFF_LOOPBACK) != 0)
             continue;
-        if ((ifa->ifa_flags & IFF_LOOPBACK) != 0)
+        if (ifa->ifa_addr->sa_family != AF_INET) // check it is IP4
             continue;
-        if (ifa->ifa_flags)
-            if (ifa->ifa_addr->sa_family == AF_INET) { // check it is IP4
-                char netMaskAddrStr[INET_ADDRSTRLEN];
-                auto netMaskAddr = ((sockaddr_in *)ifa->ifa_netmask)->sin_addr;
-                inet_ntop(AF_INET, &netMaskAddr, netMaskAddrStr, INET_ADDRSTRLEN);
-                // is a valid IP4 Address
-                tmpAddrPtr = &((sockaddr_in *)ifa->ifa_addr)->sin_addr;
-                char addressBuffer[INET_ADDRSTRLEN];
-                inet_ntop(AF_INET, tmpAddrPtr, addressBuffer, INET_ADDRSTRLEN);
-                out_addrs.push_back({ ifa->ifa_name, addressBuffer, netMaskAddrStr });
-            }
+
+        const auto netMaskAddr = reinterpret_cast<const sockaddr_in *>(ifa->ifa_netmask)->sin_addr;
+        char netMaskAddrStr[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &netMaskAddr, netMaskAddrStr, INET_ADDRSTRLEN);
+
+        const auto hostAddr = reinterpret_cast<const sockaddr_in *>(ifa->ifa_addr)->sin_addr;
+        char addressBuffer[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &hostAddr, addressBuffer, INET_ADDRSTRLEN);
+
+        out_addrs.push_back({ ifa->ifa_name, addressBuffer, netMaskAddrStr });
     }
-    if (ifAddrStruct != NULL)
-        freeifaddrs(ifAddrStruct);
 #endif
     return ret_addrs();
 }
 
 AssignedAddr get_selected_assigned_addr(int32_t &outIndex) {
     const auto addrs = get_all_assigned_addrs();
-    if (outIndex >= addrs.size()) {
+    if (outIndex < 0 || std::cmp_greater_equal(outIndex, addrs.size())) {
         LOG_ERROR("Invalid index {}, returning first address", outIndex);
         outIndex = 0;
     }
@@ -471,7 +438,7 @@ AssignedAddr get_selected_assigned_addr(int32_t &outIndex) {
 void init_address(int32_t &outIndex, uint32_t &netAddr, uint32_t &broadcastAddr) {
     // Initialize the net and broadcast address based on the assigned address and netmask
     const auto addr = get_selected_assigned_addr(outIndex);
-    int netMask;
+    uint32_t netMask = 0;
     inet_pton(AF_INET, addr.addr.c_str(), &netAddr);
     inet_pton(AF_INET, addr.netMask.c_str(), &netMask);
     broadcastAddr = netAddr | ~netMask;

@@ -32,7 +32,7 @@ enum SceDisplayPixelFormat {
 };
 
 struct ThreadState;
-typedef std::shared_ptr<ThreadState> ThreadStatePtr;
+using ThreadStatePtr = std::shared_ptr<ThreadState>;
 
 struct DisplayStateVBlankWaitInfo {
     ThreadStatePtr target_thread;

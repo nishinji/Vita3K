@@ -22,6 +22,7 @@
 
 #include <sstream>
 #include <string>
+#include <string_view>
 
 namespace shader::usse::disasm {
 
@@ -31,7 +32,7 @@ extern thread_local std::stringstream *disasm_storage;
 // Disasm helpers
 //
 
-const std::string &opcode_str(const Opcode &e);
+std::string_view opcode_str(Opcode e);
 const char *e_predicate_str(ExtPredicate p);
 const char *s_predicate_str(ShortPredicate p);
 const char *data_type_str(DataType p);

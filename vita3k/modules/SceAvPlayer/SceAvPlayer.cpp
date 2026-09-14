@@ -45,8 +45,8 @@ typedef void (*SceAvPlayerEventCallback)(uint32_t arguments, int32_t event_id, i
 */
 
 struct PlayerInfoState;
-typedef std::shared_ptr<PlayerInfoState> PlayerPtr;
-typedef std::map<SceUID, PlayerPtr> PlayerStates;
+using PlayerPtr = std::shared_ptr<PlayerInfoState>;
+using PlayerStates = std::map<SceUID, PlayerPtr>;
 
 struct AvPlayerState {
     std::mutex mutex;

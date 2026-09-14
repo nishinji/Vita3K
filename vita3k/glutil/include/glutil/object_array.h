@@ -73,7 +73,7 @@ public:
     }
 
 private:
-    typedef std::array<GLuint, Size> Names;
+    using Names = std::array<GLuint, Size>;
 
     Names names;
     renderer::Deleter *deleter = nullptr;

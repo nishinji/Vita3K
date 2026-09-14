@@ -23,14 +23,16 @@
 #include <util/log.h>
 #include <util/string_utils.h>
 
+#include <algorithm>
+#include <ranges>
+
 Patches get_patches(fs::path &path, const std::string &titleid, const std::string &bin) {
     // Find a file in the path with the titleid
     Patches patches;
 
     for (auto &entry : fs::directory_iterator(path)) {
-        auto filename = fs_utils::path_to_utf8(entry.path().filename());
         // Just in case users decide to use lowercase filenames
-        std::transform(filename.begin(), filename.end(), filename.begin(), ::toupper);
+        const auto filename = string_utils::toupper(fs_utils::path_to_utf8(entry.path().filename()));
 
         bool is_patchlist = filename.contains("PATCHLIST.TXT");
 
@@ -50,7 +52,10 @@ Patches get_patches(fs::path &path, const std::string &titleid, const std::strin
 
                 // If this is a header, remember the binary the next patches are for
                 if (!line.empty() && line[0] == '[') {
-                    patch_header = read_header(line, is_patchlist);
+                    if (const auto header = read_header(line, is_patchlist))
+                        patch_header = *header;
+                    else
+                        LOG_ERROR("Failed to parse patch header: {} [{}]", line_number, line);
                     continue;
                 }
 
@@ -79,66 +84,57 @@ Patch parse_patch(const std::string &patch) {
     // Example, equivalent to `t1_mov(0, 1)`:
     // 0:0xA994 0x01 0x20
     // Keep in mind that we are in little endian
-    uint8_t seg = std::stoi(patch.substr(0, patch.find(':')));
+    const auto colon = patch.find(':');
+    const auto space = patch.find(' ');
+
+    const auto seg = static_cast<uint8_t>(std::stoi(patch.substr(0, colon)));
 
     // Everything after the first colon, and before the first space, is the offset
-    uint32_t offset = std::stoull(patch.substr(patch.find(':') + 1, patch.find(' ') - patch.find(':') - 1), nullptr, 16);
+    const auto offset = static_cast<uint32_t>(std::stoull(patch.substr(colon + 1, space - colon - 1), nullptr, 16));
 
     // All following values (separated by spaces) are the values to be written
-    std::string values = patch.substr(patch.find(' ') + 1);
+    std::string values = patch.substr(space + 1);
     // set vblank to 1(60Hz) for now
     string_utils::replace(values, "4 - vblank", "3");
     string_utils::replace(values, "vblank - 1", "0");
     string_utils::replace(values, "vblank", "1");
     std::vector<uint8_t> values_vec;
 
-    // Get all additional values separated by spaces
-    size_t pos = 0;
-
     // Clean up potential instructions by removing spaces in between brackets
     // Eg. t1_mov(0, 1) becomes t1_mov(0,1)
     strip_arg_spaces(values);
 
-    // If there is only one value, set pos to the end of the string
-    if ((pos = values.find(' ')) == std::string::npos)
-        pos = values.length() - 1;
-
-    do {
-        pos = values.find(' ');
-        std::string val = values.substr(0, pos);
+    // Get all additional values separated by spaces
+    for (const auto raw_value : std::views::split(std::string_view(values), ' ')) {
+        std::string_view val(raw_value);
 
         // Strip 0x from the value if it exists
-        if (val.length() > 2 && val[0] == '0' && val[1] == 'x')
-            val.erase(0, 2);
+        if (val.length() > 2 && val.starts_with("0x"))
+            val.remove_prefix(2);
 
-        unsigned long long bytes;
+        unsigned long long bytes = 0;
         uint8_t byte_count = 0;
-        std::string inst = strip_args(val);
-        Instruction instruction = to_instruction(inst);
+        const std::string inst = strip_args(val);
 
-        if (instruction != Instruction::INVALID) {
-            auto args = get_args(val);
+        if (to_instruction(inst) != Instruction::INVALID) {
+            const auto args = get_args(val);
             std::vector<uint32_t> arg_conv;
 
             arg_conv.reserve(args.size());
-            std::transform(args.begin(), args.end(), std::back_inserter(arg_conv), [](std::string &s) { return std::stoull(s, nullptr, 16); });
+            std::ranges::transform(args, std::back_inserter(arg_conv), [](const std::string &s) { return static_cast<uint32_t>(std::stoull(s, nullptr, 16)); });
 
             bytes = translate(inst, arg_conv);
 
             LOG_INFO("Translated {} to 0x{:X}", val, bytes);
         } else {
-            bytes = std::stoull(values.substr(0, pos), nullptr, 16);
+            bytes = std::stoull(std::string(val), nullptr, 16);
             // We need to count this, as patches may have bytes of zeros that we don't want to just ignore by passing 0 to toBytes
-            byte_count = val.length() % 2 == 0 ? val.length() / 2 : val.length() / 2 + 1;
+            byte_count = static_cast<uint8_t>((val.length() + 1) / 2);
         }
 
-        auto byte_vec = to_bytes(bytes, byte_count);
-
-        values_vec.reserve(values_vec.size() + byte_vec.size());
+        const auto byte_vec = to_bytes(bytes, byte_count);
         values_vec.insert(values_vec.end(), byte_vec.begin(), byte_vec.end());
-
-        values.erase(0, pos + 1);
-    } while (pos != std::string::npos);
+    }
 
     return Patch{ seg, offset, values_vec };
 }

@@ -33,13 +33,15 @@ typedef int (*SceHttpsCallback)(unsigned int verifyEsrr, Ptr<void> const sslCert
 #include <boost/algorithm/string/predicate.hpp>
 
 struct ci_compare {
+    using is_transparent = void;
+
     bool operator()(std::string_view const &a,
         std::string_view const &b) const {
         return boost::ilexicographical_compare(a, b);
     }
 };
 
-typedef std::map<std::string, std::string, ci_compare> HeadersMapType;
+using HeadersMapType = std::map<std::string, std::string, ci_compare>;
 
 enum SceHttpsErrorCode : uint32_t {
     SCE_HTTPS_ERROR_CERT = 0x80435060,

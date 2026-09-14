@@ -36,7 +36,7 @@ namespace gui {
 namespace {
 
 std::string lowercase_copy(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(), [](const unsigned char ch) {
+    std::ranges::transform(value, value.begin(), [](const unsigned char ch) {
         return static_cast<char>(std::tolower(ch));
     });
     return value;

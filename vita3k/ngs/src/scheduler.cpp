@@ -191,7 +191,8 @@ void VoiceScheduler::update(KernelState &kern, const MemState &mem, const SceUID
 
 int32_t VoiceScheduler::get_position(Voice *v) {
     // we assume the scheduler lock is being held when calling this function
-    return vector_utils::find_index(queue, v);
+    const auto index = vector_utils::find_index(queue, v);
+    return index ? static_cast<int32_t>(*index) : -1;
 }
 
 bool VoiceScheduler::resort_to_respect_dependencies(const MemState &mem, Voice *source) {

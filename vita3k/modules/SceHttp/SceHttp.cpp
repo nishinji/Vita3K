@@ -503,7 +503,7 @@ EXPORT(SceInt, sceHttpCreateRequest2, SceInt connId, const char *method, const c
 
     auto conn = emuenv.http.connections.find(connId);
 
-    auto intMethod = (SceHttpMethods)net_utils::char_method_to_int(method);
+    const auto intMethod = static_cast<SceHttpMethods>(net_utils::char_method_to_int(method));
     // Even if it returns error (-1), it will get handled in the call
 
     return CALL_EXPORT(sceHttpCreateRequestWithURL, connId, intMethod, conn->second.url.c_str(), contentLength);
@@ -520,7 +520,7 @@ EXPORT(SceInt, sceHttpCreateRequestWithURL2, SceInt connId, const char *method, 
     if (!path)
         return RET_ERROR(SCE_HTTP_ERROR_INVALID_VALUE);
 
-    auto intMethod = (SceHttpMethods)net_utils::char_method_to_int(method);
+    const auto intMethod = static_cast<SceHttpMethods>(net_utils::char_method_to_int(method));
     // Even if it returns error (-1), it will get handled in the call
 
     return CALL_EXPORT(sceHttpCreateRequestWithURL, connId, intMethod, path, contentLength);
@@ -1119,7 +1119,7 @@ EXPORT(SceInt, sceHttpSendRequest, SceInt reqId, const char *postData, SceSize s
     }
 
     // TODO: does a HEAD/OPTIONS request need content-length to exist?
-    if (req->second.res.headers.find("content-length") == req->second.headers.end()) {
+    if (!req->second.res.headers.contains("content-length")) {
         delete[] resHeaders;
         return RET_ERROR(SCE_HTTP_ERROR_NO_CONTENT_LENGTH);
     }

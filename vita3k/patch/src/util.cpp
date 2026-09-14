@@ -17,16 +17,19 @@
 
 #include "patch/util.h"
 
-#include <map>
+#include <algorithm>
+#include <ranges>
 #include <util/log.h>
 
 // This function will return a PatchHeader struct, which contains the titleid and the binary name (if provided)
-PatchHeader read_header(std::string &header, bool is_patchlist) {
+std::optional<PatchHeader> read_header(std::string &header, bool is_patchlist) {
     PatchHeader patch_header;
 
     strip_arg_spaces(header, '[', ']');
 
     auto args = get_args(header, '[', ']');
+    if (args.empty())
+        return std::nullopt;
 
     // When this is in a patchlist file, the possible values are [titleid, bin] and [titleid]
     // When this is in a title-specific patch file, the possible values are just [bin] (because the titleid is already known)
@@ -57,102 +60,93 @@ std::vector<uint8_t> to_bytes(unsigned long long value, uint8_t count) {
 
     // If count is 0, go until we see a byte of all 0s
     if (count == 0) {
-        while (value != 0) {
-            bytes.push_back(value & 0xFF);
-            value >>= 8;
-        }
+        for (; value != 0; value >>= 8)
+            bytes.push_back(static_cast<uint8_t>(value));
 
         return bytes;
     }
 
     // Otherwise, just go as much as count tells us
-    for (uint8_t i = 0; i < count; i++) {
-        bytes.push_back((value >> ((count - 1 - i) * 8)) & 0xFF);
-    }
+    bytes.reserve(count);
+    for (uint8_t i = count; i > 0; --i)
+        bytes.push_back(static_cast<uint8_t>(value >> ((i - 1) * 8)));
 
     return bytes;
 }
 
 void strip_arg_spaces(std::string &line, char open, char close) {
+    std::string stripped;
+    stripped.reserve(line.size());
+
     bool in_brackets = false;
-
-    for (size_t i = 0; i < line.size(); ++i) {
-        if (line[i] == open) {
+    for (const char c : line) {
+        if (c == open)
             in_brackets = true;
-        } else if (line[i] == close) {
+        else if (c == close)
             in_brackets = false;
-        }
 
-        if (in_brackets && line[i] == ' ') {
-            line.erase(i, 1);
-            --i;
-        }
+        if (!in_brackets || c != ' ')
+            stripped += c;
     }
+
+    line = std::move(stripped);
 }
 
 void strip_arg_spaces(std::string &line) {
     return strip_arg_spaces(line, '(', ')');
 }
 
-Instruction to_instruction(const std::string &inst) {
-    auto it = instruction_funcs.find(inst);
+static const Op *find_op(std::string_view inst) {
+    const auto it = std::ranges::find(instruction_funcs, inst, &Op::name);
 
-    if (it != instruction_funcs.end())
-        return it->second.instruction;
-
-    return Instruction::INVALID;
+    return it == instruction_funcs.end() ? nullptr : &*it;
 }
 
-bool is_valid_instruction(std::string &inst) {
+Instruction to_instruction(std::string_view inst) {
+    const Op *op = find_op(inst);
+
+    return op ? op->instruction : Instruction::INVALID;
+}
+
+bool is_valid_instruction(std::string_view inst) {
     return to_instruction(strip_args(inst)) != Instruction::INVALID;
 }
 
-std::string strip_args(std::string inst) {
-    auto open = inst.find('(');
-    auto close = inst.find(')');
+std::string strip_args(std::string_view inst) {
+    const auto open = inst.find('(');
+    const auto close = inst.find(')');
 
-    if (open == std::string::npos || close == std::string::npos)
-        return inst;
+    if (open == std::string_view::npos || close == std::string_view::npos)
+        return std::string(inst);
 
-    inst.erase(open, close - open + 1);
+    std::string stripped(inst);
+    stripped.erase(open, close - open + 1);
 
-    return inst;
+    return stripped;
 }
 
-std::vector<std::string> get_args(std::string inst, char open, char close) {
-    auto open_pos = inst.find(open);
-    auto close_pos = inst.find(close);
-    std::vector<std::string> args;
+std::vector<std::string> get_args(std::string_view inst, char open, char close) {
+    const auto open_pos = inst.find(open);
+    const auto close_pos = inst.find(close);
 
-    if (open_pos == std::string::npos || close_pos == std::string::npos)
-        return args;
+    if (open_pos == std::string_view::npos || close_pos == std::string_view::npos)
+        return {};
 
-    inst = inst.substr(open_pos + 1, close_pos - open_pos - 1);
+    const auto values = inst.substr(open_pos + 1, close_pos - open_pos - 1);
 
-    // If there is only one value, set pos to the end of the string
-    if ((open_pos = inst.find(',')) == std::string::npos)
-        open_pos = inst.length() - 1;
-
-    do {
-        open_pos = inst.find(',');
-        std::string val = inst.substr(0, open_pos);
-
-        args.push_back(val);
-        inst.erase(0, open_pos + 1);
-    } while (open_pos != std::string::npos);
-
-    return args;
+    return values
+        | std::views::split(',')
+        | std::views::transform([](auto &&arg) { return std::string(std::string_view(arg)); })
+        | std::ranges::to<std::vector>();
 }
 
-std::vector<std::string> get_args(std::string inst) {
+std::vector<std::string> get_args(std::string_view inst) {
     return get_args(inst, '(', ')');
 }
 
-uint32_t translate(std::string &inst, std::vector<uint32_t> &args) {
-    auto it = instruction_funcs.find(inst);
-
-    if (it != instruction_funcs.end())
-        return it->second.translate(args);
+uint32_t translate(std::string_view inst, std::vector<uint32_t> &args) {
+    if (const Op *op = find_op(inst))
+        return op->translate(args);
 
     LOG_WARN("Instruction {} could not be translated! It will be replaced with NOP", inst);
 

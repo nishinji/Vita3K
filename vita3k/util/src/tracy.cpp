@@ -28,8 +28,8 @@
 namespace tracy_module_utils {
 
 constexpr int max_modules = 128; // If not enough increase to 64*n
-typedef std::bitset<max_modules> tracy_module_flags;
-typedef std::vector<std::string> tracy_module_names;
+using tracy_module_flags = std::bitset<max_modules>;
+using tracy_module_names = std::vector<std::string>;
 
 static tracy_module_names &get_tracy_available_advanced_profiling_modules() {
     static tracy_module_names tracy_available_advanced_profiling_modules{};
@@ -54,23 +54,18 @@ bool is_tracy_active(tracy_module_helper module) {
 }
 
 bool is_tracy_active(const std::string &module) {
-    int module_index = vector_utils::find_index(get_tracy_available_advanced_profiling_modules(), module);
-    if (module_index >= 0)
-        return get_tracy_advanced_profiling_modules().test(module_index);
-    else
-        return false;
+    const auto module_index = vector_utils::find_index(get_tracy_available_advanced_profiling_modules(), module);
+    return module_index && get_tracy_advanced_profiling_modules().test(*module_index);
 }
 
 void set_tracy_active(const std::string &module, bool value) {
-    int module_index = vector_utils::find_index(get_tracy_available_advanced_profiling_modules(), module);
-    if (module_index >= 0) {
-        get_tracy_advanced_profiling_modules().set(module_index, value);
-    }
+    if (const auto module_index = vector_utils::find_index(get_tracy_available_advanced_profiling_modules(), module))
+        get_tracy_advanced_profiling_modules().set(*module_index, value);
 }
 
 std::vector<std::string> get_available_module_names() {
     std::vector<std::string> names = get_tracy_available_advanced_profiling_modules();
-    std::sort(names.begin(), names.end());
+    std::ranges::sort(names);
     return names;
 }
 

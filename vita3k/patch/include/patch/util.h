@@ -18,24 +18,26 @@
 #pragma once
 
 #include <array>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <util/types.h>
 #include <vector>
 
 #include "patch/instructions.h"
 #include "patch/patch.h"
 
-PatchHeader read_header(std::string &header, bool is_patchlist);
+std::optional<PatchHeader> read_header(std::string &header, bool is_patchlist);
 std::vector<uint8_t> to_bytes(unsigned long long value, uint8_t count);
 
 void strip_arg_spaces(std::string &line);
 void strip_arg_spaces(std::string &line, char open, char close);
 
-Instruction to_instruction(const std::string &inst);
-bool is_valid_instruction(std::string &inst);
-std::string strip_args(std::string inst);
+Instruction to_instruction(std::string_view inst);
+bool is_valid_instruction(std::string_view inst);
+std::string strip_args(std::string_view inst);
 
-std::vector<std::string> get_args(std::string inst, char open, char close);
-std::vector<std::string> get_args(std::string inst);
+std::vector<std::string> get_args(std::string_view inst, char open, char close);
+std::vector<std::string> get_args(std::string_view inst);
 
-uint32_t translate(std::string &inst, std::vector<uint32_t> &args);
+uint32_t translate(std::string_view inst, std::vector<uint32_t> &args);

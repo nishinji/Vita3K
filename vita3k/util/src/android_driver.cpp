@@ -221,7 +221,7 @@ bool is_library_mapped(const fs::path &library_path) {
 
     const std::string library_path_utf8 = fs_utils::path_to_utf8(library_path);
     for (std::string line; std::getline(proc_maps, line);) {
-        if (line.find(library_path_utf8) != std::string::npos)
+        if (line.contains(library_path_utf8))
             return true;
     }
 

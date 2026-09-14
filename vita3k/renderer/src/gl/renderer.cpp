@@ -36,6 +36,10 @@
 #include <gxm/types.h>
 #include <util/log.h>
 
+#include <algorithm>
+#include <array>
+#include <ranges>
+
 #ifdef _WIN32
 #include <Windows.h>
 #endif
@@ -409,30 +413,45 @@ void set_context(GLState &state, GLContext &context, const MemState &mem, const 
     }
 }
 
-static std::map<SceGxmColorFormat, std::pair<GLenum, GLenum>> GXM_COLOR_FORMAT_TO_GL_FORMAT = {
-    { SCE_GXM_COLOR_FORMAT_U8U8U8U8_ABGR, { GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV } },
-    { SCE_GXM_COLOR_FORMAT_U8U8U8U8_ARGB, { GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV } },
-    { SCE_GXM_COLOR_FORMAT_U8U8U8U8_RGBA, { GL_RGBA, GL_UNSIGNED_BYTE } },
-    { SCE_GXM_COLOR_FORMAT_U4U4U4U4_ARGB, { GL_BGRA, GL_UNSIGNED_SHORT_4_4_4_4_REV } },
-    { SCE_GXM_COLOR_FORMAT_U8U8U8_BGR, { GL_RGB, GL_UNSIGNED_BYTE } },
-    { SCE_GXM_COLOR_FORMAT_U5U6U5_RGB, { GL_RGB, GL_UNSIGNED_SHORT_5_6_5 } },
-    { SCE_GXM_COLOR_FORMAT_U8U8_AR, { GL_RG, GL_UNSIGNED_BYTE } },
-    { SCE_GXM_COLOR_FORMAT_U8_A, { GL_ALPHA, GL_UNSIGNED_BYTE } },
-    { SCE_GXM_COLOR_FORMAT_U8_R, { GL_RED, GL_UNSIGNED_BYTE } },
-    { SCE_GXM_COLOR_FORMAT_U2F10F10F10_ABGR, { GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV } },
-    { SCE_GXM_COLOR_FORMAT_U2U10U10U10_ABGR, { GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV } },
-    { SCE_GXM_COLOR_FORMAT_U10U10U10U2_RGBA, { GL_BGRA, GL_UNSIGNED_INT_10_10_10_2 } },
-    { SCE_GXM_COLOR_FORMAT_U10U10U10U2_BGRA, { GL_RGBA, GL_UNSIGNED_INT_10_10_10_2 } },
-    { SCE_GXM_COLOR_FORMAT_F16_R, { GL_RED, GL_HALF_FLOAT } },
-    { SCE_GXM_COLOR_FORMAT_F16F16_GR, { GL_RG, GL_HALF_FLOAT } },
-    { SCE_GXM_COLOR_FORMAT_F16F16F16F16_ABGR, { GL_RGBA, GL_UNSIGNED_SHORT } },
-    { SCE_GXM_COLOR_FORMAT_F16F16F16F16_ARGB, { GL_BGRA, GL_UNSIGNED_SHORT } },
-    { SCE_GXM_COLOR_FORMAT_F32_R, { GL_RED, GL_FLOAT } },
-    { SCE_GXM_COLOR_FORMAT_F32F32_GR, { GL_RG, GL_FLOAT } },
-    { SCE_GXM_COLOR_FORMAT_F11F11F10_RGB, { GL_RGB, GL_UNSIGNED_INT_10F_11F_11F_REV } },
-    { SCE_GXM_COLOR_FORMAT_SE5M9M9M9_BGR, { GL_RGB, GL_HALF_FLOAT } },
-    { SCE_GXM_COLOR_FORMAT_SE5M9M9M9_RGB, { GL_BGR, GL_HALF_FLOAT } }
+struct GxmToGlFormat {
+    SceGxmColorFormat gxm;
+    GLenum format;
+    GLenum type;
 };
+
+static constexpr auto GXM_COLOR_FORMAT_TO_GL_FORMAT = [] {
+    auto table = std::to_array<GxmToGlFormat>({ { SCE_GXM_COLOR_FORMAT_U8U8U8U8_ABGR, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV },
+        { SCE_GXM_COLOR_FORMAT_U8U8U8U8_ARGB, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV },
+        { SCE_GXM_COLOR_FORMAT_U8U8U8U8_RGBA, GL_RGBA, GL_UNSIGNED_BYTE },
+        { SCE_GXM_COLOR_FORMAT_U4U4U4U4_ARGB, GL_BGRA, GL_UNSIGNED_SHORT_4_4_4_4_REV },
+        { SCE_GXM_COLOR_FORMAT_U8U8U8_BGR, GL_RGB, GL_UNSIGNED_BYTE },
+        { SCE_GXM_COLOR_FORMAT_U5U6U5_RGB, GL_RGB, GL_UNSIGNED_SHORT_5_6_5 },
+        { SCE_GXM_COLOR_FORMAT_U8U8_AR, GL_RG, GL_UNSIGNED_BYTE },
+        { SCE_GXM_COLOR_FORMAT_U8_A, GL_ALPHA, GL_UNSIGNED_BYTE },
+        { SCE_GXM_COLOR_FORMAT_U8_R, GL_RED, GL_UNSIGNED_BYTE },
+        { SCE_GXM_COLOR_FORMAT_U2F10F10F10_ABGR, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV },
+        { SCE_GXM_COLOR_FORMAT_U2U10U10U10_ABGR, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV },
+        { SCE_GXM_COLOR_FORMAT_U10U10U10U2_RGBA, GL_BGRA, GL_UNSIGNED_INT_10_10_10_2 },
+        { SCE_GXM_COLOR_FORMAT_U10U10U10U2_BGRA, GL_RGBA, GL_UNSIGNED_INT_10_10_10_2 },
+        { SCE_GXM_COLOR_FORMAT_F16_R, GL_RED, GL_HALF_FLOAT },
+        { SCE_GXM_COLOR_FORMAT_F16F16_GR, GL_RG, GL_HALF_FLOAT },
+        { SCE_GXM_COLOR_FORMAT_F16F16F16F16_ABGR, GL_RGBA, GL_UNSIGNED_SHORT },
+        { SCE_GXM_COLOR_FORMAT_F16F16F16F16_ARGB, GL_BGRA, GL_UNSIGNED_SHORT },
+        { SCE_GXM_COLOR_FORMAT_F32_R, GL_RED, GL_FLOAT },
+        { SCE_GXM_COLOR_FORMAT_F32F32_GR, GL_RG, GL_FLOAT },
+        { SCE_GXM_COLOR_FORMAT_F11F11F10_RGB, GL_RGB, GL_UNSIGNED_INT_10F_11F_11F_REV },
+        { SCE_GXM_COLOR_FORMAT_SE5M9M9M9_BGR, GL_RGB, GL_HALF_FLOAT },
+        { SCE_GXM_COLOR_FORMAT_SE5M9M9M9_RGB, GL_BGR, GL_HALF_FLOAT } });
+    std::ranges::sort(table, {}, &GxmToGlFormat::gxm);
+    return table;
+}();
+static_assert(std::ranges::adjacent_find(GXM_COLOR_FORMAT_TO_GL_FORMAT, {}, &GxmToGlFormat::gxm) == GXM_COLOR_FORMAT_TO_GL_FORMAT.end(), "duplicate color format");
+
+static const GxmToGlFormat *find_gl_format(SceGxmColorFormat format) {
+    const auto it = std::ranges::lower_bound(GXM_COLOR_FORMAT_TO_GL_FORMAT, format, {}, &GxmToGlFormat::gxm);
+
+    return (it == GXM_COLOR_FORMAT_TO_GL_FORMAT.end() || it->gxm != format) ? nullptr : &*it;
+}
 
 static bool format_need_temp_storage(const GLState &state, SceGxmColorSurface &surface, std::vector<std::uint8_t> &storage, const std::uint32_t width, const std::uint32_t height) {
     size_t needed_pixels;
@@ -548,8 +567,8 @@ void lookup_and_get_surface_data(GLState &renderer, MemState &mem, SceGxmColorSu
         buffer_size = gxm::get_stride_in_bytes(surface.colorFormat, width) * height;
     }
 
-    auto format_gl = GXM_COLOR_FORMAT_TO_GL_FORMAT.find(format);
-    if (format_gl == GXM_COLOR_FORMAT_TO_GL_FORMAT.end()) {
+    const GxmToGlFormat *format_gl = find_gl_format(format);
+    if (!format_gl) {
         LOG_ERROR("Color format not implemented: {}, report this to developer", fmt::underlying(format));
         return;
     }
@@ -568,8 +587,8 @@ void lookup_and_get_surface_data(GLState &renderer, MemState &mem, SceGxmColorSu
 
     const SceGxmColorBaseFormat base_format = gxm::get_base_format(format);
 
-    GLenum gl_format = format_gl->second.first;
-    GLenum gl_type = format_gl->second.second;
+    GLenum gl_format = format_gl->format;
+    GLenum gl_type = format_gl->type;
     if (renderer.features.preserve_f16_nan_as_u16 && color::is_write_surface_stored_rawly(base_format)) {
         gl_format = color::get_raw_store_upload_format_type(base_format);
         gl_type = color::get_raw_store_upload_data_type(base_format);
@@ -610,8 +629,8 @@ void get_surface_data(GLState &renderer, GLContext &context, uint32_t *pixels, S
         glPixelStorei(GL_PACK_ROW_LENGTH, static_cast<GLint>(width));
     }
 
-    auto format_gl = GXM_COLOR_FORMAT_TO_GL_FORMAT.find(format);
-    if (format_gl == GXM_COLOR_FORMAT_TO_GL_FORMAT.end()) {
+    const GxmToGlFormat *format_gl = find_gl_format(format);
+    if (!format_gl) {
         LOG_ERROR("Color format not implemented: {}, report this to developer", fmt::underlying(format));
         return;
     }
@@ -633,7 +652,7 @@ void get_surface_data(GLState &renderer, GLContext &context, uint32_t *pixels, S
         glGetTexImage(GL_TEXTURE_2D, 0, color::get_raw_store_upload_format_type(base_format), color::get_raw_store_upload_data_type(base_format), temp_store);
         glBindTexture(GL_TEXTURE_2D, last_texture);
     } else {
-        glReadPixels(0, 0, static_cast<GLsizei>(width), static_cast<GLsizei>(height), format_gl->second.first, format_gl->second.second, temp_store);
+        glReadPixels(0, 0, static_cast<GLsizei>(width), static_cast<GLsizei>(height), format_gl->format, format_gl->type, temp_store);
     }
     post_process_pixels_data(renderer, pixels, temp_store, width, height, surface.strideInPixels, surface);
 

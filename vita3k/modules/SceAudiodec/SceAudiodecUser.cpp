@@ -44,10 +44,10 @@ enum {
     SCE_AUDIODEC_MP3_MPEG_VERSION_1,
 };
 
-typedef std::shared_ptr<DecoderState> DecoderPtr;
-typedef std::map<SceUID, DecoderPtr> DecoderStates;
-typedef std::set<SceUID> CodecDecoders;
-typedef std::map<SceAudiodecCodec, CodecDecoders> CodecDecodersMap;
+using DecoderPtr = std::shared_ptr<DecoderState>;
+using DecoderStates = std::map<SceUID, DecoderPtr>;
+using CodecDecoders = std::set<SceUID>;
+using CodecDecodersMap = std::map<SceAudiodecCodec, CodecDecoders>;
 
 struct AudiodecState {
     std::mutex mutex;

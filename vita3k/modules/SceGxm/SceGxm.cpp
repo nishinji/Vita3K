@@ -975,7 +975,7 @@ struct CommandListRange {
     }
 };
 
-typedef std::set<CommandListRange>::iterator RangeIterator;
+using RangeIterator = std::set<CommandListRange>::iterator;
 
 struct SceGxmCommandList {
     renderer::CommandList *list;
@@ -1394,21 +1394,21 @@ void destroy_all_render_targets(EmuEnvState &emuenv, const bool force_backend_de
 
 } // namespace gxm
 
-typedef std::uint32_t VertexCacheHash;
+using VertexCacheHash = std::uint32_t;
 
 struct VertexProgramCacheKey {
     SceGxmRegisteredProgram vertex_program;
     VertexCacheHash hash;
 };
 
-typedef std::map<VertexProgramCacheKey, Ptr<SceGxmVertexProgram>> VertexProgramCache;
+using VertexProgramCache = std::map<VertexProgramCacheKey, Ptr<SceGxmVertexProgram>>;
 
 struct FragmentProgramCacheKey {
     SceGxmRegisteredProgram fragment_program;
     SceGxmBlendInfo blend_info;
 };
 
-typedef std::map<FragmentProgramCacheKey, Ptr<SceGxmFragmentProgram>> FragmentProgramCache;
+using FragmentProgramCache = std::map<FragmentProgramCacheKey, Ptr<SceGxmFragmentProgram>>;
 
 struct SceGxmShaderPatcher {
     VertexProgramCache vertex_program_cache;

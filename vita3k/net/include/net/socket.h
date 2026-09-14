@@ -43,7 +43,7 @@ typedef int abs_socket;
 
 struct Socket;
 
-typedef std::shared_ptr<Socket> SocketPtr;
+using SocketPtr = std::shared_ptr<Socket>;
 
 struct Socket {
     int sockopt_so_onesbcast = 0;

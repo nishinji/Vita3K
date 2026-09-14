@@ -25,10 +25,10 @@
 #endif
 
 #ifdef _WIN32
-typedef SOCKET socket_t;
+using socket_t = SOCKET;
 constexpr socket_t BAD_SOCK = INVALID_SOCKET;
 #else
-typedef int32_t socket_t;
+using socket_t = int32_t;
 constexpr socket_t BAD_SOCK = -1;
 #endif
 

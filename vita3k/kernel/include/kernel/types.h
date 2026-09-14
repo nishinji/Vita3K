@@ -584,7 +584,7 @@ enum SceSysmoduleErrorCode : uint32_t {
 };
 
 typedef SceUInt64 SceKernelSysClock;
-typedef Ptr<int(SceSize args, Ptr<void> argp)> SceKernelThreadEntry;
+using SceKernelThreadEntry = Ptr<int(SceSize args, Ptr<void> argp)>;
 
 struct SceKernelSegmentInfo {
     SceSize size; //!< this structure size (0x18)

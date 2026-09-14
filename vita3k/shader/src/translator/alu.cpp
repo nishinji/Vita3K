@@ -25,7 +25,10 @@
 #include <shader/usse_types.h>
 #include <util/log.h>
 
+#include <algorithm>
+#include <array>
 #include <optional>
+#include <stdexcept>
 
 using namespace shader;
 using namespace usse;
@@ -819,23 +822,23 @@ bool USSETranslatorVisitor::sop2(
     Imm1 dest_mod,
     Imm7 src1_n,
     Imm7 src2_n) {
-    static auto selector_zero = [](spv::Builder &b, const spv::Id type, const spv::Id src1_color, const spv::Id src2_color, const spv::Id src1_alpha,
-                                    const spv::Id src2_alpha) {
+    constexpr auto selector_zero = [](spv::Builder &b, const spv::Id type, const spv::Id src1_color, const spv::Id src2_color, const spv::Id src1_alpha,
+                                       const spv::Id src2_alpha) {
         return utils::make_uniform_vector_from_type(b, type, 0);
     };
 
-    static auto selector_src1_color = [](spv::Builder &b, const spv::Id type, const spv::Id src1_color, const spv::Id src2_color, const spv::Id src1_alpha,
-                                          const spv::Id src2_alpha) {
+    constexpr auto selector_src1_color = [](spv::Builder &b, const spv::Id type, const spv::Id src1_color, const spv::Id src2_color, const spv::Id src1_alpha,
+                                             const spv::Id src2_alpha) {
         return src1_color;
     };
 
-    static auto selector_src2_color = [](spv::Builder &b, const spv::Id type, const spv::Id src1_color, const spv::Id src2_color, const spv::Id src1_alpha,
-                                          const spv::Id src2_alpha) {
+    constexpr auto selector_src2_color = [](spv::Builder &b, const spv::Id type, const spv::Id src1_color, const spv::Id src2_color, const spv::Id src1_alpha,
+                                             const spv::Id src2_alpha) {
         return src2_color;
     };
 
-    static auto selector_src1_alpha = [](spv::Builder &b, const spv::Id type, const spv::Id src1_color, const spv::Id src2_color, const spv::Id src1_alpha,
-                                          const spv::Id src2_alpha) {
+    constexpr auto selector_src1_alpha = [](spv::Builder &b, const spv::Id type, const spv::Id src1_color, const spv::Id src2_color, const spv::Id src1_alpha,
+                                             const spv::Id src2_alpha) {
         if (!b.isScalarType(type) || b.getNumTypeComponents(type) > 1) {
             // We must do a composite construct
             return b.createCompositeConstruct(type, { src1_alpha, src1_alpha, src1_alpha });
@@ -844,8 +847,8 @@ bool USSETranslatorVisitor::sop2(
         return src1_alpha;
     };
 
-    static auto selector_src2_alpha = [](spv::Builder &b, const spv::Id type, const spv::Id src1_color, const spv::Id src2_color, const spv::Id src1_alpha,
-                                          const spv::Id src2_alpha) {
+    constexpr auto selector_src2_alpha = [](spv::Builder &b, const spv::Id type, const spv::Id src1_color, const spv::Id src2_color, const spv::Id src1_alpha,
+                                             const spv::Id src2_alpha) {
         if (!b.isScalarType(type) || b.getNumTypeComponents(type) > 1) {
             // We must do a composite construct
             return b.createCompositeConstruct(type, { src2_alpha, src2_alpha, src2_alpha });
@@ -855,17 +858,16 @@ bool USSETranslatorVisitor::sop2(
     };
 
     // This opcode always operates on C10.
-    static Opcode operations[] = {
+    static constexpr std::array operations{
         Opcode::FADD,
         Opcode::FSUB,
         Opcode::FMIN,
         Opcode::FMAX
     };
 
-    using SelectorFunc = std::function<spv::Id(spv::Builder &, const spv::Id, const spv::Id, const spv::Id,
-        const spv::Id, const spv::Id)>;
+    using SelectorFunc = spv::Id (*)(spv::Builder &, spv::Id, spv::Id, spv::Id, spv::Id, spv::Id);
 
-    static SelectorFunc color_selector_1[] = {
+    static constexpr std::array<SelectorFunc, 7> color_selector_1{
         selector_zero,
         selector_src1_color,
         selector_src2_color,
@@ -875,7 +877,7 @@ bool USSETranslatorVisitor::sop2(
         nullptr // source alpha scale
     };
 
-    static SelectorFunc color_selector_2[] = {
+    static constexpr std::array<SelectorFunc, 7> color_selector_2{
         selector_zero,
         selector_src1_color,
         selector_src2_color,
@@ -885,14 +887,14 @@ bool USSETranslatorVisitor::sop2(
         nullptr // zero source 2 minus half.
     };
 
-    static SelectorFunc alpha_selector_1[] = {
+    static constexpr std::array<SelectorFunc, 4> alpha_selector_1{
         selector_zero,
         selector_src1_alpha,
         selector_src2_alpha,
         nullptr // source 2 scale.
     };
 
-    static SelectorFunc alpha_selector_2[] = {
+    static constexpr std::array<SelectorFunc, 4> alpha_selector_2{
         selector_zero,
         selector_src1_alpha,
         selector_src2_alpha,
@@ -911,12 +913,12 @@ bool USSETranslatorVisitor::sop2(
     inst.opr.src2.type = DataType::UINT8;
     inst.opr.dest.type = DataType::UINT8;
 
-    if (cop >= sizeof(operations) / sizeof(Opcode)) {
+    if (cop >= operations.size()) {
         LOG_ERROR("Invalid color opcode: {}", (int)cop);
         return true;
     }
 
-    if (aop >= sizeof(operations) / sizeof(Opcode)) {
+    if (aop >= operations.size()) {
         LOG_ERROR("Invalid alpha opcode: {}", (int)aop);
         return true;
     }
@@ -924,17 +926,17 @@ bool USSETranslatorVisitor::sop2(
     Opcode color_op = operations[cop];
     Opcode alpha_op = operations[aop];
 
-    if (csel1 >= sizeof(color_selector_1) / sizeof(SelectorFunc) || csel2 >= sizeof(color_selector_2) / sizeof(SelectorFunc) || asel1 >= sizeof(alpha_selector_1) / sizeof(SelectorFunc) || asel2 >= sizeof(alpha_selector_2) / sizeof(SelectorFunc)) {
+    if (csel1 >= color_selector_1.size() || csel2 >= color_selector_2.size() || asel1 >= alpha_selector_1.size() || asel2 >= alpha_selector_2.size()) {
         LOG_ERROR("Unknown color/alpha selector (csel1: {}, csel2: {}, asel1: {}, asel2: {}", csel1, csel2,
             asel1, asel2);
         return true;
     }
 
     // Lookup color selector
-    SelectorFunc color_selector_1_func = color_selector_1[csel1];
-    SelectorFunc color_selector_2_func = color_selector_2[csel2];
-    SelectorFunc alpha_selector_1_func = alpha_selector_1[asel1];
-    SelectorFunc alpha_selector_2_func = alpha_selector_2[asel2];
+    const SelectorFunc color_selector_1_func = color_selector_1[csel1];
+    const SelectorFunc color_selector_2_func = color_selector_2[csel2];
+    const SelectorFunc alpha_selector_1_func = alpha_selector_1[asel1];
+    const SelectorFunc alpha_selector_2_func = alpha_selector_2[asel2];
 
     if (!color_selector_1_func || !color_selector_2_func || !alpha_selector_1_func || !alpha_selector_2_func) {
         LOG_ERROR("Unimplemented color/alpha selector (csel1: {}, csel2: {}, asel1: {}, asel2: {}", csel1, csel2,
@@ -1072,37 +1074,37 @@ bool shader::usse::USSETranslatorVisitor::sop2m(Imm2 pred,
     Imm7 destnum,
     Imm7 src1num,
     Imm7 src2num) {
-    static auto selector_zero = [](spv::Builder &b, const spv::Id type, const spv::Id src1, const spv::Id src2) {
+    constexpr auto selector_zero = [](spv::Builder &b, const spv::Id type, const spv::Id src1, const spv::Id src2) {
         return utils::make_uniform_vector_from_type(b, type, 0);
     };
 
-    static auto selector_src1_color = [](spv::Builder &b, const spv::Id type, const spv::Id src1, const spv::Id src2) {
+    constexpr auto selector_src1_color = [](spv::Builder &b, const spv::Id type, const spv::Id src1, const spv::Id src2) {
         return src1;
     };
 
-    static auto selector_src2_color = [](spv::Builder &b, const spv::Id type, const spv::Id src1, const spv::Id src2) {
+    constexpr auto selector_src2_color = [](spv::Builder &b, const spv::Id type, const spv::Id src1, const spv::Id src2) {
         return src2;
     };
 
-    static auto selector_src1_alpha = [](spv::Builder &b, const spv::Id type, const spv::Id src1, const spv::Id src2) {
+    constexpr auto selector_src1_alpha = [](spv::Builder &b, const spv::Id type, const spv::Id src1, const spv::Id src2) {
         return b.createOp(spv::OpVectorShuffle, type, { { true, src1 }, { true, src1 }, { false, 3 }, { false, 3 }, { false, 3 }, { false, 3 } });
     };
 
-    static auto selector_src2_alpha = [](spv::Builder &b, spv::Id type, const spv::Id src1, const spv::Id src2) {
+    constexpr auto selector_src2_alpha = [](spv::Builder &b, spv::Id type, const spv::Id src1, const spv::Id src2) {
         return b.createOp(spv::OpVectorShuffle, type, { { true, src2 }, { true, src2 }, { false, 3 }, { false, 3 }, { false, 3 }, { false, 3 } });
     };
 
     // This opcode always operates on C10.
-    static Opcode operations[] = {
+    static constexpr std::array operations{
         Opcode::FADD,
         Opcode::FSUB,
         Opcode::FMIN,
         Opcode::FMAX
     };
 
-    using SelectorFunc = std::function<spv::Id(spv::Builder &, const spv::Id, const spv::Id, const spv::Id)>;
+    using SelectorFunc = spv::Id (*)(spv::Builder &, spv::Id, spv::Id, spv::Id);
 
-    static SelectorFunc selector[] = {
+    static constexpr std::array<SelectorFunc, 8> selector{
         selector_zero,
         nullptr, // source alpha saturated.
         selector_src1_color,
@@ -1125,12 +1127,12 @@ bool shader::usse::USSETranslatorVisitor::sop2m(Imm2 pred,
     inst.opr.src2.type = DataType::UINT8;
     inst.opr.dest.type = DataType::UINT8;
 
-    if (cop >= sizeof(operations) / sizeof(Opcode)) {
+    if (cop >= operations.size()) {
         LOG_ERROR("Invalid color opcode: {}", (int)cop);
         return true;
     }
 
-    if (aop >= sizeof(operations) / sizeof(Opcode)) {
+    if (aop >= operations.size()) {
         LOG_ERROR("Invalid alpha opcode: {}", (int)aop);
         return true;
     }
@@ -1139,8 +1141,8 @@ bool shader::usse::USSETranslatorVisitor::sop2m(Imm2 pred,
     Opcode alpha_op = operations[aop];
 
     // Lookup color selector
-    SelectorFunc operation_1_lhs_selector_func = selector[sel1];
-    SelectorFunc operation_2_lhs_selector_func = selector[sel2];
+    const SelectorFunc operation_1_lhs_selector_func = selector[sel1];
+    const SelectorFunc operation_2_lhs_selector_func = selector[sel2];
 
     if (!operation_1_lhs_selector_func || !operation_2_lhs_selector_func) {
         LOG_ERROR("Unimplemented operation selector (sel1: {}, sel2: {}", sel1, sel2);
@@ -1258,28 +1260,28 @@ bool shader::usse::USSETranslatorVisitor::sop3(Imm2 pred,
     Imm7 src0n,
     Imm7 src1n,
     Imm7 src2n) {
-    static auto selector_zero = [](spv::Builder &b, const spv::Id type, const spv::Id src0_color, const spv::Id src1_color, const spv::Id src2_color, const spv::Id src0_alpha, const spv::Id src1_alpha,
-                                    const spv::Id src2_alpha) {
+    constexpr auto selector_zero = [](spv::Builder &b, const spv::Id type, const spv::Id src0_color, const spv::Id src1_color, const spv::Id src2_color, const spv::Id src0_alpha, const spv::Id src1_alpha,
+                                       const spv::Id src2_alpha) {
         return utils::make_uniform_vector_from_type(b, type, 0);
     };
 
-    static auto selector_src0_color = [](spv::Builder &b, const spv::Id type, const spv::Id src0_color, const spv::Id src1_color, const spv::Id src2_color, const spv::Id src0_alpha, const spv::Id src1_alpha,
-                                          const spv::Id src2_alpha) {
+    constexpr auto selector_src0_color = [](spv::Builder &b, const spv::Id type, const spv::Id src0_color, const spv::Id src1_color, const spv::Id src2_color, const spv::Id src0_alpha, const spv::Id src1_alpha,
+                                             const spv::Id src2_alpha) {
         return src0_color;
     };
 
-    static auto selector_src1_color = [](spv::Builder &b, const spv::Id type, const spv::Id src0_color, const spv::Id src1_color, const spv::Id src2_color, const spv::Id src0_alpha, const spv::Id src1_alpha,
-                                          const spv::Id src2_alpha) {
+    constexpr auto selector_src1_color = [](spv::Builder &b, const spv::Id type, const spv::Id src0_color, const spv::Id src1_color, const spv::Id src2_color, const spv::Id src0_alpha, const spv::Id src1_alpha,
+                                             const spv::Id src2_alpha) {
         return src1_color;
     };
 
-    static auto selector_src2_color = [](spv::Builder &b, const spv::Id type, const spv::Id src0_color, const spv::Id src1_color, const spv::Id src2_color, const spv::Id src0_alpha, const spv::Id src1_alpha,
-                                          const spv::Id src2_alpha) {
+    constexpr auto selector_src2_color = [](spv::Builder &b, const spv::Id type, const spv::Id src0_color, const spv::Id src1_color, const spv::Id src2_color, const spv::Id src0_alpha, const spv::Id src1_alpha,
+                                             const spv::Id src2_alpha) {
         return src2_color;
     };
 
-    static auto selector_src0_alpha = [](spv::Builder &b, const spv::Id type, const spv::Id src0_color, const spv::Id src1_color, const spv::Id src2_color, const spv::Id src0_alpha, const spv::Id src1_alpha,
-                                          const spv::Id src2_alpha) {
+    constexpr auto selector_src0_alpha = [](spv::Builder &b, const spv::Id type, const spv::Id src0_color, const spv::Id src1_color, const spv::Id src2_color, const spv::Id src0_alpha, const spv::Id src1_alpha,
+                                             const spv::Id src2_alpha) {
         if (!b.isScalarType(type) || b.getNumTypeComponents(type) > 1) {
             // We must do a composite construct
             return b.createCompositeConstruct(type, { src0_alpha, src0_alpha, src0_alpha });
@@ -1288,8 +1290,8 @@ bool shader::usse::USSETranslatorVisitor::sop3(Imm2 pred,
         return src0_alpha;
     };
 
-    static auto selector_src1_alpha = [](spv::Builder &b, const spv::Id type, const spv::Id src0_color, const spv::Id src1_color, const spv::Id src2_color, const spv::Id src0_alpha, const spv::Id src1_alpha,
-                                          const spv::Id src2_alpha) {
+    constexpr auto selector_src1_alpha = [](spv::Builder &b, const spv::Id type, const spv::Id src0_color, const spv::Id src1_color, const spv::Id src2_color, const spv::Id src0_alpha, const spv::Id src1_alpha,
+                                             const spv::Id src2_alpha) {
         if (!b.isScalarType(type) || b.getNumTypeComponents(type) > 1) {
             // We must do a composite construct
             return b.createCompositeConstruct(type, { src1_alpha, src1_alpha, src1_alpha });
@@ -1298,8 +1300,8 @@ bool shader::usse::USSETranslatorVisitor::sop3(Imm2 pred,
         return src1_alpha;
     };
 
-    static auto selector_src2_alpha = [](spv::Builder &b, const spv::Id type, const spv::Id src0_color, const spv::Id src1_color, const spv::Id src2_color, const spv::Id src0_alpha, const spv::Id src1_alpha,
-                                          const spv::Id src2_alpha) {
+    constexpr auto selector_src2_alpha = [](spv::Builder &b, const spv::Id type, const spv::Id src0_color, const spv::Id src1_color, const spv::Id src2_color, const spv::Id src0_alpha, const spv::Id src1_alpha,
+                                             const spv::Id src2_alpha) {
         if (!b.isScalarType(type) || b.getNumTypeComponents(type) > 1) {
             // We must do a composite construct
             return b.createCompositeConstruct(type, { src2_alpha, src2_alpha, src2_alpha });
@@ -1309,14 +1311,14 @@ bool shader::usse::USSETranslatorVisitor::sop3(Imm2 pred,
     };
 
     // This opcode always operates on C10.
-    static Opcode operations[] = {
+    static constexpr std::array operations{
         Opcode::FADD,
         Opcode::FSUB,
     };
 
-    using SelectorFunc = std::function<spv::Id(spv::Builder &, const spv::Id, const spv::Id, const spv::Id, const spv::Id, const spv::Id, const spv::Id, const spv::Id)>;
+    using SelectorFunc = spv::Id (*)(spv::Builder &, spv::Id, spv::Id, spv::Id, spv::Id, spv::Id, spv::Id, spv::Id);
 
-    static SelectorFunc color_selector[] = {
+    static constexpr std::array<SelectorFunc, 8> color_selector{
         selector_zero,
         nullptr, // alpha sat
         selector_src1_color,
@@ -1327,14 +1329,14 @@ bool shader::usse::USSETranslatorVisitor::sop3(Imm2 pred,
         selector_src2_alpha
     };
 
-    static SelectorFunc alpha_selector_1[] = {
+    static constexpr std::array<SelectorFunc, 4> alpha_selector_1{
         selector_zero,
         selector_src0_alpha,
         selector_src1_alpha,
         selector_src2_alpha
     };
 
-    static SelectorFunc alpha_selector_2[] = {
+    static constexpr std::array<SelectorFunc, 8> alpha_selector_2{
         selector_zero,
         nullptr, // alpha sat
         selector_src1_alpha,
@@ -1359,12 +1361,12 @@ bool shader::usse::USSETranslatorVisitor::sop3(Imm2 pred,
     inst.opr.src2.type = DataType::UINT8;
     inst.opr.dest.type = DataType::UINT8;
 
-    if (cop >= sizeof(operations) / sizeof(Opcode)) {
+    if (cop >= operations.size()) {
         LOG_ERROR("Invalid color opcode: {}", (int)cop);
         return true;
     }
 
-    if (aop >= sizeof(operations) / sizeof(Opcode)) {
+    if (aop >= operations.size()) {
         LOG_ERROR("Invalid alpha opcode: {}", (int)aop);
         return true;
     }
@@ -1372,18 +1374,18 @@ bool shader::usse::USSETranslatorVisitor::sop3(Imm2 pred,
     Opcode color_op = operations[cop];
     Opcode alpha_op = operations[aop];
 
-    if (csel1 >= sizeof(color_selector) / sizeof(SelectorFunc) || csel2 >= sizeof(color_selector) / sizeof(SelectorFunc) || asel1 >= sizeof(alpha_selector_1) / sizeof(SelectorFunc)) {
+    if (csel1 >= color_selector.size() || csel2 >= color_selector.size() || asel1 >= alpha_selector_1.size()) {
         LOG_ERROR("Unknown color/alpha selector (csel1: {}, csel2: {}, asel1: {}", csel1, csel2,
             asel1);
         return true;
     }
 
     // Lookup color selector
-    SelectorFunc color_selector_1_func = color_selector[csel1];
-    SelectorFunc color_selector_2_func = color_selector[csel2];
-    SelectorFunc alpha_selector_1_func = alpha_selector_1[asel1];
+    const SelectorFunc color_selector_1_func = color_selector[csel1];
+    const SelectorFunc color_selector_2_func = color_selector[csel2];
+    const SelectorFunc alpha_selector_1_func = alpha_selector_1[asel1];
     // Taking csel2 for alpha 2 looks like the correct behavior
-    SelectorFunc alpha_selector_2_func = alpha_selector_2[csel2];
+    const SelectorFunc alpha_selector_2_func = alpha_selector_2[csel2];
 
     if (!color_selector_1_func || !color_selector_2_func || !alpha_selector_1_func) {
         LOG_ERROR("Unimplemented color/alpha selector (csel1: {}, csel2: {}, asel1: {}", csel1, csel2,
@@ -1498,7 +1500,7 @@ enum class DualSrcId {
     NONE,
 };
 
-typedef std::array<DualSrcId, 3> DualSrcLayout;
+using DualSrcLayout = std::array<DualSrcId, 3>;
 
 static std::optional<DualSrcLayout> get_dual_op1_src_layout(uint8_t count, Imm2 config) {
     switch (count) {
@@ -1633,7 +1635,7 @@ bool USSETranslatorVisitor::vdual(
     Instruction op1;
     Instruction op2;
 
-    const Opcode op1_codes[16] = {
+    static constexpr std::array<Opcode, 16> op1_codes{
         Opcode::VMAD,
         Opcode::VDP,
         Opcode::VSSQ,
@@ -1653,7 +1655,7 @@ bool USSETranslatorVisitor::vdual(
         Opcode::INVALID,
     };
 
-    const Opcode op2_codes[16] = {
+    static constexpr std::array<Opcode, 16> op2_codes{
         Opcode::INVALID,
         Opcode::VDP,
         Opcode::VSSQ,
@@ -1676,26 +1678,36 @@ bool USSETranslatorVisitor::vdual(
     // Each instruction might have a different source layout or write mask depending on how the instruction works.
     // Let's store instruction information in a map so it's easy for each instruction to be loaded.
     struct DualOpInfo {
+        Opcode opcode;
         uint8_t src_count;
         bool vector_load;
         bool vector_store;
     };
 
-    const std::map<Opcode, DualOpInfo> op_info = {
-        { Opcode::VMAD, { 3, true, true } },
-        { Opcode::VDP, { 2, true, false } },
-        { Opcode::VSSQ, { 1, true, false } },
-        { Opcode::VMUL, { 2, true, true } },
-        { Opcode::VADD, { 2, true, true } },
-        { Opcode::VMOV, { 1, true, true } },
-        { Opcode::FRSQ, { 1, false, false } },
-        { Opcode::FRCP, { 1, false, false } },
-        { Opcode::FMAD, { 3, false, false } },
-        { Opcode::FADD, { 2, false, false } },
-        { Opcode::FMUL, { 2, false, false } },
-        { Opcode::FSUBFLR, { 2, false, false } },
-        { Opcode::FEXP, { 1, false, false } },
-        { Opcode::FLOG, { 1, false, false } },
+    static constexpr std::array op_info{
+        DualOpInfo{ Opcode::VMAD, 3, true, true },
+        DualOpInfo{ Opcode::VDP, 2, true, false },
+        DualOpInfo{ Opcode::VSSQ, 1, true, false },
+        DualOpInfo{ Opcode::VMUL, 2, true, true },
+        DualOpInfo{ Opcode::VADD, 2, true, true },
+        DualOpInfo{ Opcode::VMOV, 1, true, true },
+        DualOpInfo{ Opcode::FRSQ, 1, false, false },
+        DualOpInfo{ Opcode::FRCP, 1, false, false },
+        DualOpInfo{ Opcode::FMAD, 3, false, false },
+        DualOpInfo{ Opcode::FADD, 2, false, false },
+        DualOpInfo{ Opcode::FMUL, 2, false, false },
+        DualOpInfo{ Opcode::FSUBFLR, 2, false, false },
+        DualOpInfo{ Opcode::FEXP, 1, false, false },
+        DualOpInfo{ Opcode::FLOG, 1, false, false },
+    };
+
+    // Keeps std::map::at's behaviour of throwing on an opcode with no dual-issue form
+    const auto find_op_info = [](Opcode opcode) -> const DualOpInfo & {
+        const auto it = std::ranges::find(op_info, opcode, &DualOpInfo::opcode);
+        if (it == op_info.end())
+            throw std::out_of_range(fmt::format("No dual-issue info for opcode {}", static_cast<int>(opcode)));
+
+        return *it;
     };
 
     auto get_dual_op_write_mask = [&](const DualOpInfo &op, bool dest_internal) {
@@ -1711,8 +1723,8 @@ bool USSETranslatorVisitor::vdual(
     op1.opcode = op1_codes[(!comp_count_type && dual_op1_ext_vec3_or_has_w_vec4) << 3u | dual_op1];
     op2.opcode = op2_codes[dual_op2_ext << 3u | dual_op2];
 
-    const auto op1_info = op_info.at(op1.opcode);
-    const auto op2_info = op_info.at(op2.opcode);
+    const auto &op1_info = find_op_info(op1.opcode);
+    const auto &op2_info = find_op_info(op2.opcode);
 
     // Unified is only part of instruction that can reference any bank. Others are internal.
     Operand unified_dest;

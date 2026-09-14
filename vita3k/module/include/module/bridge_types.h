@@ -24,7 +24,7 @@ struct MemState;
 // By default, do no special conversion.
 template <typename HostType>
 struct BridgeTypes {
-    typedef HostType ArmType;
+    using ArmType = HostType;
 
     static HostType arm_to_host(const ArmType &t, const MemState &mem) {
         return t;
@@ -34,7 +34,7 @@ struct BridgeTypes {
 // Convert from address in ARM register/memory to host pointer.
 template <typename Pointee>
 struct BridgeTypes<Pointee *> {
-    typedef Ptr<Pointee> ArmType;
+    using ArmType = Ptr<Pointee>;
 
     static Pointee *arm_to_host(const ArmType &t, const MemState &mem) {
         return t.get(mem);

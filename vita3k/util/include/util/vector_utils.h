@@ -18,62 +18,56 @@
 #pragma once
 
 #include <algorithm>
-#include <unordered_set>
+#include <optional>
+#include <ranges>
 #include <vector>
 
 namespace vector_utils {
 
 /**
  * \brief Merges and sorts two vectors. Also eliminates duplicates.
- * Optimal based on: http://stackoverflow.com/a/24477023
  * \param cur The current vector.
  * \param append The new vector to append. Always assume to be smaller than cur.
  * \return A vector of the same type as the inputs.
  */
-template <typename T, typename A = std::allocator<T>, typename H = std::hash<T>, typename P = std::equal_to<T>>
+template <typename T, typename A = std::allocator<T>>
 std::vector<T, A> merge_vectors(const std::vector<T, A> &cur, const std::vector<T, A> &append) {
-    std::vector<T, A> new_vector = cur;
-    new_vector.insert(new_vector.end(), append.begin(), append.end());
+    std::vector<T, A> merged = cur;
+    merged.insert(merged.end(), append.begin(), append.end());
 
-    std::unordered_set<T, H, P, A> s;
-    for (const auto &i : new_vector)
-        s.insert(i);
-    new_vector.assign(s.begin(), s.end());
-    std::sort(new_vector.begin(), new_vector.end());
-    return new_vector;
+    std::ranges::sort(merged);
+    const auto duplicates = std::ranges::unique(merged);
+    merged.erase(duplicates.begin(), duplicates.end());
+
+    return merged;
 }
 
-template <typename T, typename V>
-size_t find_index(const T &v, const V &value) {
-    auto it = std::find(v.begin(), v.end(), value);
-    if (it != v.end()) {
-        // The value was found, return its index
-        return std::distance(v.begin(), it);
-    } else {
-        // The value was not found, return -1
-        return -1;
-    }
+template <std::ranges::forward_range T, typename V>
+std::optional<size_t> find_index(const T &v, const V &value) {
+    const auto it = std::ranges::find(v, value);
+    if (it == std::ranges::end(v))
+        return std::nullopt;
+
+    return static_cast<size_t>(std::ranges::distance(std::ranges::begin(v), it));
 }
 
-template <typename T, typename V>
+template <std::ranges::forward_range T, typename V>
 bool push_if_not_exists(T &v, const V &value) {
-    if (!std::ranges::contains(v, value)) {
-        v.push_back(value);
-        return false;
-    } else {
+    if (std::ranges::contains(v, value))
         return true;
-    }
+
+    v.push_back(value);
+    return false;
 }
 
-template <typename T, typename V>
+template <std::ranges::forward_range T, typename V>
 bool erase_first(T &v, const V &value) {
-    auto it = std::find(v.begin(), v.end(), value);
-    if (it != v.end()) {
-        v.erase(it);
-        return true;
-    } else {
+    const auto it = std::ranges::find(v, value);
+    if (it == std::ranges::end(v))
         return false;
-    }
+
+    v.erase(it);
+    return true;
 }
 
 } // namespace vector_utils

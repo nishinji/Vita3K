@@ -19,8 +19,9 @@
 
 #include <shader/usse_types.h>
 
+#include <array>
 #include <string>
-#include <unordered_map>
+#include <string_view>
 
 using namespace shader::usse;
 
@@ -32,13 +33,17 @@ thread_local std::stringstream *disasm_storage = nullptr;
 // Disasm helpers
 //
 
-const std::string &opcode_str(const Opcode &e) {
-    static const std::unordered_map<Opcode, const std::string> names = {
-#define OPCODE(n) { Opcode::n, std::string(#n) },
+std::string_view opcode_str(Opcode e) {
+    // Size is spelled out: std::array's CTAD folds over every element, blowing clang's nesting limit
+    static constexpr std::array<std::string_view, static_cast<size_t>(Opcode::INVALID) + 1> names{
+#define OPCODE(n) std::string_view(#n),
 #include "shader/usse_opcodes.inc"
 #undef OPCODE
     };
-    return names.at(e);
+
+    const auto index = static_cast<size_t>(e);
+
+    return index < names.size() ? names[index] : "UNKNOWN";
 }
 
 const char *e_predicate_str(ExtPredicate p) {

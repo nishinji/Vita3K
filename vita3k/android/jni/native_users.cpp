@@ -102,7 +102,7 @@ Java_org_vita3k_emulator_NativeLib_deleteUser(JNIEnv *env, jclass, jstring user_
         return JNI_FALSE;
 
     const std::string user_id = jstring_to_string(env, user_id_str);
-    if (emuenv->app.user_list.users.find(user_id) == emuenv->app.user_list.users.end())
+    if (!emuenv->app.user_list.users.contains(user_id))
         return JNI_FALSE;
 
     app::delete_user(*emuenv, user_id);

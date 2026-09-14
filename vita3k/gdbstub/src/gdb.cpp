@@ -75,7 +75,7 @@ struct PacketCommand {
     bool is_valid = false;
 };
 
-typedef std::function<std::string(EmuEnvState &state, PacketCommand &command)> PacketFunction;
+using PacketFunction = std::function<std::string(EmuEnvState &state, PacketCommand &command)>;
 
 struct PacketFunctionBundle {
     std::string_view name;

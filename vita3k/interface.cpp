@@ -59,7 +59,7 @@
 #include <memory>
 #include <regex>
 
-typedef std::shared_ptr<mz_zip_archive> ZipPtr;
+using ZipPtr = std::shared_ptr<mz_zip_archive>;
 
 inline void delete_zip(mz_zip_archive *zip) {
     mz_zip_reader_end(zip);

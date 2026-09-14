@@ -39,7 +39,7 @@ using UniformBufferSizes = std::array<std::uint32_t, 15>;
 namespace renderer {
 
 // State types
-typedef std::map<Sha256Hash, const SceGxmProgram *> GXPPtrMap;
+using GXPPtrMap = std::map<Sha256Hash, const SceGxmProgram *>;
 
 struct UniformSetRequest {
     const SceGxmProgramParameter *parameter;
@@ -175,7 +175,7 @@ struct Context {
     virtual ~Context() = default;
 };
 
-typedef std::bitset<SCE_GXM_MAX_TEXTURE_UNITS> TextureInfo;
+using TextureInfo = std::bitset<SCE_GXM_MAX_TEXTURE_UNITS>;
 
 struct ShaderProgram {
     Sha256Hash hash;

@@ -530,17 +530,10 @@ void delete_app(EmuEnvState &emuenv, const std::string &app_path) {
         auto &state = emuenv.app.apps_list;
         std::lock_guard<std::mutex> lock(state.mutex);
 
-        state.apps.erase(
-            std::remove_if(state.apps.begin(), state.apps.end(),
-                [&](const AppEntry &app) { return app.path == app_path; }),
-            state.apps.end());
+        std::erase_if(state.apps, [&](const AppEntry &app) { return app.path == app_path; });
 
-        for (auto &[user_id, times] : state.app_times) {
-            times.erase(
-                std::remove_if(times.begin(), times.end(),
-                    [&](const AppTime &t) { return t.app_path == app_path; }),
-                times.end());
-        }
+        for (auto &[user_id, times] : state.app_times)
+            std::erase_if(times, [&](const AppTime &t) { return t.app_path == app_path; });
 
         save_app_times(emuenv);
     }

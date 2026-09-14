@@ -32,8 +32,8 @@ struct CPUState;
 struct CPUContext;
 struct CPUInterface;
 
-typedef std::unique_ptr<CPUState, std::function<void(CPUState *)>> CPUStatePtr;
-typedef std::unique_ptr<CPUInterface> CPUInterfacePtr;
+using CPUStatePtr = std::unique_ptr<CPUState, std::function<void(CPUState *)>>;
+using CPUInterfacePtr = std::unique_ptr<CPUInterface>;
 
 inline constexpr std::size_t MAX_CORE_COUNT = 150;
 

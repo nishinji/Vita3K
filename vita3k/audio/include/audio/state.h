@@ -53,8 +53,8 @@ struct AudioOutPort {
     int mode = 0;
 };
 
-typedef std::shared_ptr<AudioOutPort> AudioOutPortPtr;
-typedef std::map<int, AudioOutPortPtr> AudioOutPortPtrs;
+using AudioOutPortPtr = std::shared_ptr<AudioOutPort>;
+using AudioOutPortPtrs = std::map<int, AudioOutPortPtr>;
 
 struct AudioInPort {
     void *id = nullptr;

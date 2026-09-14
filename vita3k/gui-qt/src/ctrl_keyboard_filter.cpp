@@ -128,7 +128,7 @@ void CtrlKeyboardFilter::update_state(const input::PhysicalKeyCode key, const bo
         const auto primary_it = primary != input::PhysicalKeyCode::Unbound ? m_pressed_keys.find(primary) : m_pressed_keys.end();
         if (primary_it != m_pressed_keys.end())
             return true;
-        return alternate != input::PhysicalKeyCode::Unbound && m_pressed_keys.find(alternate) != m_pressed_keys.end();
+        return alternate != input::PhysicalKeyCode::Unbound && m_pressed_keys.contains(alternate);
     };
 
     float axes[4];

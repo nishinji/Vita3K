@@ -29,8 +29,8 @@
 #include <memory>
 #include <mutex>
 
-typedef std::shared_ptr<SDL_Gamepad> GamepadPtr;
-typedef std::shared_ptr<SDL_Haptic> HapticPtr;
+using GamepadPtr = std::shared_ptr<SDL_Gamepad>;
+using HapticPtr = std::shared_ptr<SDL_Haptic>;
 
 struct Controller {
     GamepadPtr controller;
@@ -52,7 +52,7 @@ struct SDL_GUIDComparator {
     }
 };
 
-typedef std::map<SDL_GUID, Controller, SDL_GUIDComparator> ControllerList;
+using ControllerList = std::map<SDL_GUID, Controller, SDL_GUIDComparator>;
 
 struct VirtualKeyboardState {
     uint32_t buttons = 0;

@@ -96,12 +96,9 @@ void display_manager::dispose(const std::vector<uint32_t> &uids) {
         cleanup_internal();
     }
 
-    m_dirty_list.erase(
-        std::remove_if(m_dirty_list.begin(), m_dirty_list.end(),
-            [&uids](const std::shared_ptr<overlay> &e) {
-                return std::find(uids.begin(), uids.end(), e->uid) != uids.end();
-            }),
-        m_dirty_list.end());
+    std::erase_if(m_dirty_list, [&uids](const std::shared_ptr<overlay> &e) {
+        return std::ranges::contains(uids, e->uid);
+    });
 }
 
 bool display_manager::remove_type(uint32_t type_id) {
@@ -121,16 +118,15 @@ bool display_manager::remove_type(uint32_t type_id) {
 }
 
 bool display_manager::remove_uid(uint32_t uid) {
-    for (auto it = m_iface_list.begin(); it != m_iface_list.end(); ++it) {
-        if ((*it)->uid == uid) {
-            on_overlay_removed(*it);
-            m_dirty_list.push_back(std::move(*it));
-            m_iface_list.erase(it);
-            return true;
-        }
-    }
+    const auto it = std::ranges::find(m_iface_list, uid, [](const auto &e) { return e->uid; });
+    if (it == m_iface_list.end())
+        return false;
 
-    return false;
+    on_overlay_removed(*it);
+    m_dirty_list.push_back(std::move(*it));
+    m_iface_list.erase(it);
+
+    return true;
 }
 
 void display_manager::cleanup_internal() {

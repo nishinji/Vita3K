@@ -45,7 +45,7 @@ struct YUVConversionCache {
 enum class Backend : uint32_t;
 static constexpr size_t TextureCacheSize = 1024;
 
-typedef std::array<uint32_t, 4> TextureGxmDataRepr;
+using TextureGxmDataRepr = std::array<uint32_t, 4>;
 struct TextureCacheInfo {
     uint64_t hash = 0;
     SceGxmTexture texture;

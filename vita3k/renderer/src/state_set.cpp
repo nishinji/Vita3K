@@ -35,6 +35,9 @@
 
 #include <config/state.h>
 
+#include <array>
+#include <utility>
+
 namespace renderer {
 COMMAND_SET_STATE(region_clip) {
     TRACY_FUNC_COMMANDS_SET_STATE(region_clip);
@@ -532,12 +535,13 @@ COMMAND_SET_STATE(visibility_index) {
     }
 }
 
-COMMAND(handle_set_state) {
-    // TRACY_FUNC_COMMANDS(handle_set_state); All set state commands have tracy so kinda redundant
-    renderer::GXMState gxm_state_to_set = helper.pop<renderer::GXMState>();
-    using StateChangeHandlerFunc = decltype(cmd_set_state_region_clip);
+using StateChangeHandlerFunc = decltype(cmd_set_state_region_clip);
 
-    static const std::map<renderer::GXMState, StateChangeHandlerFunc *> handlers = {
+// Indexed by GXMState; unhandled states stay null
+constexpr auto state_handlers = [] {
+    std::array<StateChangeHandlerFunc *, static_cast<size_t>(GXMState::TotalState)> table{};
+
+    constexpr std::pair<GXMState, StateChangeHandlerFunc *> entries[]{
         { GXMState::RegionClip, cmd_set_state_region_clip },
         { GXMState::Program, cmd_set_state_program },
         { GXMState::Viewport, cmd_set_state_viewport },
@@ -558,11 +562,22 @@ COMMAND(handle_set_state) {
         { GXMState::VisibilityIndex, cmd_set_state_visibility_index }
     };
 
-    auto result = handlers.find(gxm_state_to_set);
+    for (const auto &[state, handler] : entries)
+        table[static_cast<size_t>(state)] = handler;
 
-    if (result != handlers.end()) {
+    return table;
+}();
+
+COMMAND(handle_set_state) {
+    // TRACY_FUNC_COMMANDS(handle_set_state); All set state commands have tracy so kinda redundant
+    const renderer::GXMState gxm_state_to_set = helper.pop<renderer::GXMState>();
+
+    const auto index = static_cast<size_t>(gxm_state_to_set);
+    StateChangeHandlerFunc *handler = index < state_handlers.size() ? state_handlers[index] : nullptr;
+
+    if (handler) {
         // LOG_TRACE("State set: {}", (int)gxm_state_to_set);
-        result->second(renderer, mem, config, helper, render_context);
+        handler(renderer, mem, config, helper, render_context);
     } else {
         LOG_ERROR("Unknown state set command {}", static_cast<uint16_t>(gxm_state_to_set));
     }

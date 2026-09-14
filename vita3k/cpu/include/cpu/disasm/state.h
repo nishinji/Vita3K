@@ -22,7 +22,7 @@
 
 struct cs_insn;
 
-typedef std::unique_ptr<cs_insn, std::function<void(cs_insn *)>> InsnPtr;
+using InsnPtr = std::unique_ptr<cs_insn, std::function<void(cs_insn *)>>;
 
 struct DisasmState {
     size_t csh;

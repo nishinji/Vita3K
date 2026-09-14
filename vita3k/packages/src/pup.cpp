@@ -29,23 +29,30 @@
 #include <util/fs.h>
 
 #include <algorithm>
+#include <array>
 #include <fstream>
-#include <map>
+#include <ranges>
+#include <string_view>
 
 // Credits to TeamMolecule for their original work on this https://github.com/TeamMolecule/sceutils
 
-static const std::map<int, std::string> PUP_TYPES = {
-    { 0x100, "version.txt" },
-    { 0x101, "license.xml" },
-    { 0x200, "psp2swu.self" },
-    { 0x204, "cui_setupper.self" },
-    { 0x400, "package_scewm.wm" },
-    { 0x401, "package_sceas.as" },
-    { 0x2005, "UpdaterES1.CpUp" },
-    { 0x2006, "UpdaterES2.CpUp" },
+struct PupType {
+    int type;
+    std::string_view filename;
 };
 
-static const char *FSTYPE[] = {
+static constexpr std::array PUP_TYPES{
+    PupType{ 0x100, "version.txt" },
+    PupType{ 0x101, "license.xml" },
+    PupType{ 0x200, "psp2swu.self" },
+    PupType{ 0x204, "cui_setupper.self" },
+    PupType{ 0x400, "package_scewm.wm" },
+    PupType{ 0x401, "package_sceas.as" },
+    PupType{ 0x2005, "UpdaterES1.CpUp" },
+    PupType{ 0x2006, "UpdaterES2.CpUp" },
+};
+
+static constexpr auto FSTYPE = std::to_array<std::string_view>({
     "unknown0",
     "os0",
     "unknown2",
@@ -74,7 +81,7 @@ static const char *FSTYPE[] = {
     "pervasive19",
     "unknown1A",
     "psp_emulist",
-};
+});
 
 static std::string make_filename(unsigned char *hdr, int64_t filetype) {
     uint32_t magic = 0;
@@ -95,7 +102,7 @@ static std::string make_filename(unsigned char *hdr, int64_t filetype) {
 
         static int typecount = 0;
 
-        if (t < 0x1C) { // 0x1C is the file separator
+        if (t < FSTYPE.size()) { // anything past the table is the file separator
             std::string name = fmt::format("{}-{:0>2}.pkg", FSTYPE[t], typecount);
             typecount++;
             return name;
@@ -151,9 +158,11 @@ static void extract_pup_files(const fs::path &pup, const fs::path &output) {
         memcpy(&length, &rec[16], 8);
         memcpy(&flags, &rec[24], 8);
 
-        std::string filename = "";
-        if (PUP_TYPES.contains(filetype)) {
-            filename = PUP_TYPES.at(filetype);
+        const auto pup_type = std::ranges::find(PUP_TYPES, filetype, &PupType::type);
+
+        std::string filename;
+        if (pup_type != PUP_TYPES.end()) {
+            filename = pup_type->filename;
         } else {
             fseek(infile, offset, SEEK_SET);
             char hdr[HEADER_LENGTH];

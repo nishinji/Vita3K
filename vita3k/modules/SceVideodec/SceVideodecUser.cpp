@@ -24,8 +24,8 @@
 #include <util/tracy.h>
 TRACY_MODULE_NAME(SceVideodecUser);
 
-typedef std::shared_ptr<H264DecoderState> H264DecoderPtr;
-typedef std::map<SceUID, H264DecoderPtr> H264DecoderStates;
+using H264DecoderPtr = std::shared_ptr<H264DecoderState>;
+using H264DecoderStates = std::map<SceUID, H264DecoderPtr>;
 
 struct VideodecState {
     std::mutex mutex;

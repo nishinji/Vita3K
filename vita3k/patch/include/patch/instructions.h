@@ -18,8 +18,7 @@
 #pragma once
 
 #include <array>
-#include <map>
-#include <string>
+#include <string_view>
 #include <util/types.h>
 #include <vector>
 
@@ -35,6 +34,7 @@ enum class Instruction {
 };
 
 struct Op {
+    std::string_view name;
     Instruction instruction;
     TranslateFn translate;
 };
@@ -52,8 +52,8 @@ uint32_t nop(std::vector<uint32_t> &args);
 uint32_t t1_mov(std::vector<uint32_t> &args);
 uint32_t a1_mov(std::vector<uint32_t> &args);
 
-static const std::map<std::string, Op> instruction_funcs = {
-    { "nop", { Instruction::NOP, nop } },
-    { "t1_mov", { Instruction::T1_MOV, t1_mov } },
-    { "a1_mov", { Instruction::A1_MOV, a1_mov } },
+inline constexpr std::array instruction_funcs{
+    Op{ "nop", Instruction::NOP, nop },
+    Op{ "t1_mov", Instruction::T1_MOV, t1_mov },
+    Op{ "a1_mov", Instruction::A1_MOV, a1_mov },
 };

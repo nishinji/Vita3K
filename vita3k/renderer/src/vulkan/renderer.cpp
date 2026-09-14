@@ -157,7 +157,7 @@ namespace renderer::vulkan {
 static bool patch_bcn_once(void *function_to_patch) {
     static std::unordered_set<void *> patched_functions;
 
-    if (patched_functions.find(function_to_patch) != patched_functions.end()) {
+    if (patched_functions.contains(function_to_patch)) {
         LOG_INFO("BCeNabler patch already applied");
         return true;
     }

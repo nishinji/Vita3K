@@ -1115,7 +1115,7 @@ bool VKSurfaceCache::check_for_surface(MemState &mem, Address source_address, Ca
     if (!state.features.enable_memory_mapping || state.disable_surface_sync)
         return false;
 
-    if (vector_utils::find_index(cpu_surfaces_changed, source_address) != -1) {
+    if (std::ranges::contains(cpu_surfaces_changed, source_address)) {
         // there is a transfer operation pending on this surface, just add the callback after and we are done
         state.request_queue.push(CallbackRequest{ new CallbackRequestFunction(std::move(callback)) });
 

@@ -16,6 +16,7 @@
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 #include <algorithm>
+#include <ranges>
 
 #include <io/device.h>
 
@@ -23,20 +24,15 @@ namespace device {
 
 std::string construct_normalized_path(const VitaIoDevice dev, const std::string &path, const std::string &ext) {
     const auto device_path = get_device_string(dev, true);
-    if (path.empty()) { // Wants the device only
-        auto ret = device_path + "/";
-        return ret;
-    }
+    if (path.empty()) // Wants the device only
+        return device_path + "/";
 
     // Normalize the path
-    auto normalized = path;
-    normalized.front() == '/' ? normalized = device_path + normalized : normalized = device_path + '/' + normalized;
+    auto normalized = path.front() == '/' ? device_path + path : device_path + '/' + path;
 
     if (!ext.empty()) {
-        if (fs::path(normalized).has_extension()) {
-            const auto last_index = normalized.find_last_of('.');
-            normalized = normalized.substr(0, last_index + 1) + ext;
-        }
+        if (fs::path(normalized).has_extension())
+            normalized.erase(normalized.find_last_of('.'));
         normalized += '.' + ext;
     }
 
@@ -48,12 +44,11 @@ std::string remove_device_from_path(const std::string &path, const VitaIoDevice 
         return {};
     // Trim the path to include only the substring after the device string
     const auto device_length = get_device_string(device, true).length();
-    auto out = path;
-    out = out.substr(device_length, out.size());
+    auto out = path.substr(device_length);
     if (!mod_path.empty())
-        !out.empty() && out.front() == '/' ? out = mod_path + out : out = mod_path + '/' + out;
-    if (!out.empty() && out.front() == '/')
-        out = out.substr(1, out.length());
+        out = (!out.empty() && out.front() == '/') ? mod_path + out : mod_path + '/' + out;
+    if (out.starts_with('/'))
+        out.erase(0, 1);
 
     return out;
 }
@@ -67,12 +62,13 @@ VitaIoDevice get_device(const std::string &path) {
         return VitaIoDevice::_INVALID;
 
     auto p = path.substr(0, colon);
-    std::transform(p.begin(), p.end(), p.begin(), tolower);
+    std::ranges::transform(p, p.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
     VitaIoDevice result;
     if (boost::describe::enum_from_string(p.c_str(), result))
         return result;
-    else
-        return VitaIoDevice::_INVALID;
+
+    return VitaIoDevice::_INVALID;
 }
 
 std::string get_device_string(const VitaIoDevice dev, const bool with_colon) {
@@ -83,7 +79,7 @@ std::string remove_duplicate_device(const std::string &path, VitaIoDevice &devic
     auto cur_path = remove_device_from_path(path, device);
     if (get_device(cur_path) != VitaIoDevice::_INVALID) {
         device = get_device(cur_path);
-        if (cur_path.find_first_of(':') != std::string::npos)
+        if (cur_path.contains(':'))
             cur_path = remove_duplicate_device(cur_path, device);
         return cur_path;
     }
