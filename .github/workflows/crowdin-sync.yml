@@ -1,0 +1,139 @@
+# Brings the overlay translations back from Crowdin once a month.
+# The Qt interface is synced in nishinji/vita3k_translations instead.
+
+name: Sync overlay translations
+
+on:
+  # 04:00 UTC on the first day of every month.
+  schedule:
+    - cron: '0 4 1 * *'
+
+  workflow_dispatch:
+    inputs:
+      min_completion:
+        description: 'How much of a new language has to be translated before it ships, in percent'
+        required: false
+        default: '80'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# One import at a time: two runs would fight over the same branch.
+concurrency:
+  group: crowdin-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync overlay translations
+    if: github.repository == 'Vita3K/Vita3K'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      # The Crowdin action turns a refused download into a warning and still exits 0, which would
+      # carry an empty import all the way to a pull request. Ask the API first, where a missing
+      # role or scope is an error with a readable message.
+      - name: Check the Crowdin credentials
+        env:
+          CROWDIN_PROJECT_ID: ${{ secrets.CROWDIN_PROJECT_ID }}
+          CROWDIN_PERSONAL_TOKEN: ${{ secrets.CROWDIN_PERSONAL_TOKEN }}
+        run: |
+          files="$RUNNER_TEMP/crowdin-files.json"
+          api="https://api.crowdin.com/api/v2/projects/$CROWDIN_PROJECT_ID/files?limit=500"
+          status=$(curl -sS -o "$files" -w '%{http_code}' -H "Authorization: Bearer $CROWDIN_PERSONAL_TOKEN" "$api")
+
+          if [ "$status" != "200" ]; then
+            echo "Crowdin answered HTTP $status:"
+            cat "$files"
+            echo
+            echo "CROWDIN_PERSONAL_TOKEN needs the manager or developer role on the project,"
+            echo "and the project, project.source and project.translation scopes."
+            exit 1
+          fi
+
+          echo "Crowdin project files, as path / type / export pattern. crowdin.yml has to agree"
+          echo "with the path and the export pattern, or the download lands somewhere else."
+          jq -r '.data[].data | [.path, .type, (.exportOptions.exportPattern // "-")] | @tsv' "$files"
+
+      - name: Download translations from Crowdin
+        uses: crowdin/github-action@v3
+        with:
+          # A string Crowdin never received cannot be translated, and the download would then take
+          # away the translation the emulator already ships for it, so push the source first.
+          upload_sources: true
+          download_translations: true
+          # Missing keys fall back to English on their own, and their absence is how a language is measured.
+          skip_untranslated_strings: true
+          # Approval is barely used on this project, so a language is measured on what has been translated.
+          export_only_approved: false
+          # The commit and the pull request happen below, once the import has been filtered.
+          push_translations: false
+          create_pull_request: false
+          # The action runs as root in Docker, so the files it writes would be root-owned and unremovable.
+          user: auto
+          project_id: ${{ secrets.CROWDIN_PROJECT_ID }}
+          token: ${{ secrets.CROWDIN_PERSONAL_TOKEN }}
+
+      # The steps below and the pull request itself all read this file, so name it once here.
+      - name: Start the pull request body
+        run: |
+          echo "REPORT_PATH=$RUNNER_TEMP/pull-request-body.md" >> "$GITHUB_ENV"
+          {
+            echo "Monthly import from [Crowdin](https://crowdin.com/project/vita3k)."
+            echo
+          } > "$RUNNER_TEMP/pull-request-body.md"
+
+      - name: Pick the languages to ship
+        id: pick
+        run: >-
+          python3 tools/i18n/sync_crowdin_import.py
+          --min-completion "${{ inputs.min_completion || '80' }}"
+          --report "$REPORT_PATH"
+
+      # A catalog Crowdin reshaped (unknown key, moved placeholder) fails the build, so find out
+      # here rather than on the push to master that follows the merge.
+      - name: Check that the catalogs still generate
+        id: generate
+        continue-on-error: true
+        run: >-
+          python3 tools/i18n/generate_lang_catalog.py
+          --input-dir i18n/lang
+          --strings-def vita3k/lang/include/lang/strings.def
+          --output-header "$RUNNER_TEMP/generated_catalog.h"
+          --output-source "$RUNNER_TEMP/generated_catalog.cpp"
+
+      - name: Note a rejected catalog in the pull request
+        if: steps.generate.outcome == 'failure'
+        run: |
+          {
+            echo "> [!CAUTION]"
+            echo "> \`generate_lang_catalog.py\` rejected these catalogs, so the emulator will not build. Do not merge until it passes."
+            echo
+          } >> "$REPORT_PATH"
+
+      - name: Open a pull request
+        uses: peter-evans/create-pull-request@v8
+        with:
+          branch: l10n/crowdin
+          add-paths: i18n/lang
+          commit-message: 'i18n: Sync overlay translations from Crowdin'
+          # The action defaults the author to whoever triggered the run, which on a schedule is
+          # whichever human touched the repository last. Nobody wrote these strings by hand.
+          author: 'github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>'
+          title: 'i18n: Sync overlay translations from Crowdin'
+          body-path: ${{ env.REPORT_PATH }}
+          # An unreadable file or a rejected catalog is not something to merge on a glance at the diff.
+          draft: ${{ steps.pick.outputs.blocking == 'true' || steps.generate.outcome == 'failure' }}
+
+      - name: Fail if the import needs attention
+        if: steps.pick.outputs.blocking == 'true' || steps.generate.outcome == 'failure'
+        run: exit 1

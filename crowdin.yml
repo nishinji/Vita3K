@@ -1,0 +1,21 @@
+# Crowdin configuration for the Vita3K overlay strings.
+# The Qt interface is translated in nishinji/vita3k_translations instead.
+
+preserve_hierarchy: true
+
+files:
+  # Chrome i18n JSON rather than plain JSON, so "description" reaches translators as context
+  # instead of as a string to translate.
+  - source: /i18n/lang/overlay_en.json
+    translation: /i18n/lang/overlay_%two_letters_code%.json
+    # The project already holds this file with its translations, so keep writing to it
+    # instead of letting preserve_hierarchy create a second, empty one.
+    dest: /overlay_en.json
+    type: chrome
+    languages_mapping:
+      two_letters_code:
+        en-GB: en-GB
+        pt-BR: pt-BR
+        pt-PT: pt-PT
+        zh-CN: zh-Hans
+        zh-TW: zh-Hant
