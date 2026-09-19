@@ -1095,7 +1095,7 @@ QString VitaThemesDialog::resolve_preview_background_id(
         const auto matches = [&background_id](const gui::VitaThemeBackgroundOption &option) {
             return background_id == to_qstring(option.id);
         };
-        if (std::find_if(theme.background_options.begin(), theme.background_options.end(), matches) != theme.background_options.end())
+        if (std::ranges::find_if(theme.background_options, matches) != theme.background_options.end())
             return background_id;
     }
 

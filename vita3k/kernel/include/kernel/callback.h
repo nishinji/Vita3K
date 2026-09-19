@@ -24,7 +24,7 @@
 
 struct KernelState;
 struct ThreadState;
-typedef std::shared_ptr<ThreadState> ThreadStatePtr;
+using ThreadStatePtr = std::shared_ptr<ThreadState>;
 
 struct Callback {
     /**
@@ -126,5 +126,5 @@ private:
     SceUID notifier_id = SCE_UID_INVALID_UID; // UID of the last event that notified this thread - SCE_UID_INVALID_UID if not an event
 };
 
-typedef std::shared_ptr<Callback> CallbackPtr;
+using CallbackPtr = std::shared_ptr<Callback>;
 uint32_t process_callbacks(KernelState &kernel, SceUID thread_id);

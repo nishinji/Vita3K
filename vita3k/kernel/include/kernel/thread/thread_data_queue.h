@@ -169,7 +169,7 @@ public:
     }
 
     ThreadDataQueueInterator<T> find(const T &val) override {
-        auto it = std::find(c.begin(), c.end(), val);
+        auto it = std::ranges::find(c, val);
         return make_iterator(it);
     }
 
@@ -253,7 +253,7 @@ public:
     }
 
     ThreadDataQueueInterator<T> find(const T &val) override {
-        auto it = std::find(c.begin(), c.end(), val);
+        auto it = std::ranges::find(c, val);
         return make_iterator(it);
     }
 

@@ -39,13 +39,13 @@ std::vector<T, A> merge_vectors(const std::vector<T, A> &cur, const std::vector<
     for (const auto &i : new_vector)
         s.insert(i);
     new_vector.assign(s.begin(), s.end());
-    std::sort(new_vector.begin(), new_vector.end());
+    std::ranges::sort(new_vector);
     return new_vector;
 }
 
 template <typename T, typename V>
 size_t find_index(const T &v, const V &value) {
-    auto it = std::find(v.begin(), v.end(), value);
+    auto it = std::ranges::find(v, value);
     if (it != v.end()) {
         // The value was found, return its index
         return std::distance(v.begin(), it);
@@ -67,7 +67,7 @@ bool push_if_not_exists(T &v, const V &value) {
 
 template <typename T, typename V>
 bool erase_first(T &v, const V &value) {
-    auto it = std::find(v.begin(), v.end(), value);
+    auto it = std::ranges::find(v, value);
     if (it != v.end()) {
         v.erase(it);
         return true;
