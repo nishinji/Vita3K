@@ -67,7 +67,7 @@ VitaIoDevice get_device(const std::string &path) {
         return VitaIoDevice::_INVALID;
 
     auto p = path.substr(0, colon);
-    std::transform(p.begin(), p.end(), p.begin(), tolower);
+    std::ranges::transform(p, p.begin(), tolower);
     VitaIoDevice result;
     if (boost::describe::enum_from_string(p.c_str(), result))
         return result;

@@ -102,7 +102,7 @@ EXPORT(int, kuKernelMemProtect, Ptr<void> addr, SceSize len, uint32_t prot) {
     }
 
     LOG_DEBUG("kuKernelMemProtect: addr={} len={} prot=0x{:02X} -> perm={}",
-        log_hex(addr.address()), len, prot, (int)perm);
+        log_hex(addr.address()), len, prot, static_cast<int>(perm));
     return 0;
 }
 
@@ -144,7 +144,7 @@ EXPORT(SceUID, kuKernelMemReserve, Ptr<Ptr<void>> addr, SceSize size, SceKernelM
     state->vm_blocks.emplace(uid, block);
 
     LOG_DEBUG("kuKernelMemReserve: addr=0x{:08X} size={} type=0x{:08X} uid=0x{:08X}",
-        allocated_addr, size, (uint32_t)memBlockType, uid);
+        allocated_addr, size, static_cast<uint32_t>(memBlockType), uid);
     return uid;
 }
 
@@ -176,7 +176,7 @@ EXPORT(int, kuKernelMemCommit, Ptr<void> addr, SceSize len, uint32_t prot, Ptr<K
     }
 
     LOG_DEBUG("kuKernelMemCommit: addr={} len={} prot=0x{:02X} -> perm={}",
-        log_hex(va), len, prot, (int)perm);
+        log_hex(va), len, prot, static_cast<int>(perm));
     return 0;
 }
 
