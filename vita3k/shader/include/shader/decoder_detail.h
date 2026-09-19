@@ -90,7 +90,7 @@ private:
             }
         }
 
-        assert(std::all_of(masks.begin(), masks.end(), [](auto m) { return m != 0; }));
+        assert(std::ranges::all_of(masks, [](auto m) { return m != 0; }));
 
         return std::make_tuple(masks, shifts);
     }

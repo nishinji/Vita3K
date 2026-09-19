@@ -912,12 +912,12 @@ bool USSETranslatorVisitor::sop2(
     inst.opr.dest.type = DataType::UINT8;
 
     if (cop >= sizeof(operations) / sizeof(Opcode)) {
-        LOG_ERROR("Invalid color opcode: {}", (int)cop);
+        LOG_ERROR("Invalid color opcode: {}", static_cast<int>(cop));
         return true;
     }
 
     if (aop >= sizeof(operations) / sizeof(Opcode)) {
-        LOG_ERROR("Invalid alpha opcode: {}", (int)aop);
+        LOG_ERROR("Invalid alpha opcode: {}", static_cast<int>(aop));
         return true;
     }
 
@@ -1126,12 +1126,12 @@ bool shader::usse::USSETranslatorVisitor::sop2m(Imm2 pred,
     inst.opr.dest.type = DataType::UINT8;
 
     if (cop >= sizeof(operations) / sizeof(Opcode)) {
-        LOG_ERROR("Invalid color opcode: {}", (int)cop);
+        LOG_ERROR("Invalid color opcode: {}", static_cast<int>(cop));
         return true;
     }
 
     if (aop >= sizeof(operations) / sizeof(Opcode)) {
-        LOG_ERROR("Invalid alpha opcode: {}", (int)aop);
+        LOG_ERROR("Invalid alpha opcode: {}", static_cast<int>(aop));
         return true;
     }
 
@@ -1360,12 +1360,12 @@ bool shader::usse::USSETranslatorVisitor::sop3(Imm2 pred,
     inst.opr.dest.type = DataType::UINT8;
 
     if (cop >= sizeof(operations) / sizeof(Opcode)) {
-        LOG_ERROR("Invalid color opcode: {}", (int)cop);
+        LOG_ERROR("Invalid color opcode: {}", static_cast<int>(cop));
         return true;
     }
 
     if (aop >= sizeof(operations) / sizeof(Opcode)) {
-        LOG_ERROR("Invalid alpha opcode: {}", (int)aop);
+        LOG_ERROR("Invalid alpha opcode: {}", static_cast<int>(aop));
         return true;
     }
 
@@ -1498,7 +1498,7 @@ enum class DualSrcId {
     NONE,
 };
 
-typedef std::array<DualSrcId, 3> DualSrcLayout;
+using DualSrcLayout = std::array<DualSrcId, 3>;
 
 static std::optional<DualSrcLayout> get_dual_op1_src_layout(uint8_t count, Imm2 config) {
     switch (count) {

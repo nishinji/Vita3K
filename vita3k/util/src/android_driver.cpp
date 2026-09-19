@@ -330,7 +330,7 @@ bool is_safe_driver_relative_path(const fs::path &relative_path) {
     if (relative_path.empty() || relative_path == "." || relative_path.is_absolute())
         return false;
 
-    return std::none_of(relative_path.begin(), relative_path.end(), [](const fs::path &part) {
+    return std::ranges::none_of(relative_path, [](const fs::path &part) {
         return part == "..";
     });
 }

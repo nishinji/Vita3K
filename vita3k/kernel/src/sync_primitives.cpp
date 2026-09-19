@@ -354,7 +354,7 @@ SceUID timer_find(KernelState &kernel, const char *export_name, const char *pNam
 
     const std::lock_guard<std::mutex> kernel_lock(kernel.mutex);
 
-    const auto it = std::find_if(kernel.timers.begin(), kernel.timers.end(), [=](const auto &timer) {
+    const auto it = std::ranges::find_if(kernel.timers, [=](const auto &timer) {
         return strncmp(timer.second->name, pName, KERNELOBJECT_MAX_NAME_LENGTH) == 0;
     });
 
@@ -607,7 +607,7 @@ SceUID mutex_find(KernelState &kernel, const char *export_name, const char *pNam
 
     const std::lock_guard<std::mutex> kernel_lock(kernel.mutex);
 
-    const auto it = std::find_if(kernel.mutexes.begin(), kernel.mutexes.end(), [=](const auto &mutex) {
+    const auto it = std::ranges::find_if(kernel.mutexes, [=](const auto &mutex) {
         return strncmp(mutex.second->name, pName, KERNELOBJECT_MAX_NAME_LENGTH) == 0;
     });
 
@@ -1021,7 +1021,7 @@ SceUID semaphore_find(KernelState &kernel, const char *export_name, const char *
 
     const std::lock_guard<std::mutex> kernel_lock(kernel.mutex);
 
-    const auto it = std::find_if(kernel.semaphores.begin(), kernel.semaphores.end(), [=](const auto &sema) {
+    const auto it = std::ranges::find_if(kernel.semaphores, [=](const auto &sema) {
         return strncmp(sema.second->name, pName, KERNELOBJECT_MAX_NAME_LENGTH) == 0;
     });
 
@@ -1398,7 +1398,7 @@ SceUID eventflag_find(KernelState &kernel, const char *export_name, const char *
 
     const std::lock_guard<std::mutex> kernel_lock(kernel.mutex);
 
-    const auto it = std::find_if(kernel.eventflags.begin(), kernel.eventflags.end(), [=](const auto &evf) {
+    const auto it = std::ranges::find_if(kernel.eventflags, [=](const auto &evf) {
         return strncmp(evf.second->name, pName, KERNELOBJECT_MAX_NAME_LENGTH) == 0;
     });
 
@@ -1661,7 +1661,7 @@ SceUID msgpipe_find(KernelState &kernel, const char *export_name, const char *pN
 
     const std::lock_guard<std::mutex> kernel_lock(kernel.mutex);
 
-    const auto it = std::find_if(kernel.msgpipes.begin(), kernel.msgpipes.end(), [=](const auto &msg_pipe) {
+    const auto it = std::ranges::find_if(kernel.msgpipes, [=](const auto &msg_pipe) {
         return strncmp(msg_pipe.second->name, pName, KERNELOBJECT_MAX_NAME_LENGTH) == 0;
     });
 
