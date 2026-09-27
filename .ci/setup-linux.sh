@@ -8,9 +8,9 @@ sudo add-apt-repository -y ppa:mhier/libboost-latest
 sudo add-apt-repository universe
 sudo apt update
 sudo apt -y install \
-    libboost-filesystem1.83-dev \
+\
     libboost-program-options1.83-dev \
-    libboost-system1.83-dev \
+\
     libgtk-3-dev \
     ninja-build \
     libfuse2 \

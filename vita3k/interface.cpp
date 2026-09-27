@@ -217,7 +217,7 @@ static bool install_archive_content(EmuEnvState &emuenv, const ZipPtr &zip, cons
             update_progress();
 
             std::string replace_filename = m_filename.substr(content_path.size());
-            const fs::path file_output = (output_path / fs_utils::utf8_to_path(replace_filename)).generic_path();
+            const fs::path file_output = fs_utils::generic_path(output_path / fs_utils::utf8_to_path(replace_filename));
             if (mz_zip_reader_is_file_a_directory(zip.get(), i)) {
                 fs::create_directories(file_output);
             } else {
