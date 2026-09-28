@@ -25,6 +25,7 @@
 #include <util/align.h>
 
 #include <util/log.h>
+#include <util/precise_sleep.h>
 
 #include <algorithm>
 #include <bit>
@@ -602,10 +603,21 @@ SceInt32 ThreadState::wait(std::unique_lock<std::mutex> &lock, Deadline deadline
 
 SceInt32 ThreadState::sleep(std::unique_lock<std::mutex> &lock, Deadline deadline) {
     const auto woken = [&] { return wait_over(); };
+    const bool is_delay = (wait_target.type & ~SCE_KERNEL_WAITTYPE_CB_BIT) == SCE_KERNEL_WAITTYPE_DELAY;
     update_status(ThreadStatus::waiting);
     if (deadline == Deadline::max())
         cv.wait(lock, woken);
-    else
+    else if (is_delay) {
+        // condition variable timeouts can overshoot by 2 ms (Windows), which breaks games pacing frames with delays
+        constexpr auto coarse_margin = std::chrono::milliseconds(2);
+        const bool long_delay = deadline - Deadline::clock::now() >= std::chrono::milliseconds(1);
+        if (!cv.wait_until(lock, deadline - coarse_margin, woken)) {
+            lock.unlock();
+            // spinning through short polling delays would waste a host core
+            util::sleep_until_precise(deadline, long_delay);
+            lock.lock();
+        }
+    } else
         cv.wait_until(lock, deadline, woken);
     // Before the call writes its result to the registers. A thread something holds goes on to its
     // holds, which keep it from its callbacks and its code.
