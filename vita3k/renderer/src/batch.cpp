@@ -278,6 +278,7 @@ static void render_loop(renderer::State &state, DisplayState &display, GxmState 
             state.swap_window();
         }
     }
+    auto last_present = std::chrono::steady_clock::now();
     while (!state.render_abort.load(std::memory_order_relaxed)) {
 #ifdef TRACY_ENABLE
         ZoneScopedN("Game rendering");
@@ -289,6 +290,15 @@ static void render_loop(renderer::State &state, DisplayState &display, GxmState 
 
         if (state.render_abort.load(std::memory_order_relaxed))
             break;
+
+        // OpenGL with vsync returns whenever the queue is empty; presenting the same frame again only burns CPU
+        if (!state.should_display && !state.async_flip_requested.load(std::memory_order_relaxed)
+            && state.current_backend == Backend::OpenGL && config.current_config.v_sync
+            && std::chrono::steady_clock::now() - last_present < std::chrono::milliseconds(100)) {
+            state.command_buffer_queue.top(1000);
+            continue;
+        }
+        last_present = std::chrono::steady_clock::now();
 
         if (state.overlay_manager) {
             auto precompile = state.overlay_manager->get<overlay::shader_precompile_progress>();
