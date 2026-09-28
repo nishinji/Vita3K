@@ -25,6 +25,7 @@
 #include <packages/functions.h>
 
 #include <util/lock_and_find.h>
+#include <util/precise_sleep.h>
 
 #include <chrono>
 #include <thread>
@@ -1063,11 +1064,19 @@ static int delay_thread(KernelState &kernel, SceUID thread_id, SceUInt delay_us)
     if (delay_us == 0)
         return SCE_KERNEL_ERROR_INVALID_ARGUMENT;
 
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::microseconds(delay_us);
     const ThreadStatePtr thread = kernel.get_thread(thread_id);
     std::unique_lock<std::mutex> lock(thread->mutex);
     thread->update_status(ThreadStatus::wait);
-    thread->status_cond.wait_for(lock, std::chrono::microseconds(delay_us),
-        [&] { return thread->status == ThreadStatus::run; });
+    const auto woken = [&] { return thread->status == ThreadStatus::run; };
+    // condition variable timeouts can overshoot by 2 ms (Windows), which breaks games pacing frames with delays
+    constexpr auto coarse_margin = std::chrono::milliseconds(2);
+    if (!thread->status_cond.wait_until(lock, deadline - coarse_margin, woken)) {
+        lock.unlock();
+        // spinning through short polling delays would waste a host core
+        util::sleep_until_precise(deadline, delay_us >= 1000);
+        lock.lock();
+    }
     if (thread->status != ThreadStatus::run)
         thread->update_status(ThreadStatus::run);
     return SCE_KERNEL_OK;
