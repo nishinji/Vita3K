@@ -125,6 +125,9 @@ AppsListTable::AppsListTable(QWidget *parent)
     setMouseTracking(true);
     setColumnCount(APPS_LIST_COLUMN_COUNT);
 
+    m_size_pool.setMaxThreadCount(1);
+    m_size_pool.setThreadPriority(QThread::LowestPriority);
+
     setup_header();
     verticalHeader()->setDefaultSectionSize(m_icon_size.height());
 
@@ -322,6 +325,7 @@ void AppsListTable::populate(const std::vector<app::AppEntry> &apps,
     };
 
     m_sort_refresh_queued = false;
+    m_size_pool.clear();
     clearContents();
     verticalHeader()->setDefaultSectionSize(m_icon_size.height());
     setRowCount(static_cast<int>(apps.size()));
@@ -453,7 +457,7 @@ void AppsListTable::populate(const std::vector<app::AppEntry> &apps,
     }
 
     for (const PendingSizeLoad &pending : pending_size_loads) {
-        QThreadPool::globalInstance()->start([this, pending]() {
+        m_size_pool.start([this, pending]() {
             const quint64 size = directory_size(pending.app_dir);
             QMetaObject::invokeMethod(
                 this, [this, pending, size]() {

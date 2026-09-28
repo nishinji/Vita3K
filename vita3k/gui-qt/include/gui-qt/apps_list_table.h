@@ -23,6 +23,7 @@
 #include <util/fs.h>
 
 #include <QTableWidget>
+#include <QThreadPool>
 
 #include <unordered_map>
 #include <vector>
@@ -96,4 +97,6 @@ private:
     int m_sort_column{ static_cast<int>(AppsListColumn::Title) };
     bool m_sort_refresh_queued{ false };
     std::unordered_map<std::string, quint64> m_size_cache;
+    // walking every app folder must not compete with a running game
+    QThreadPool m_size_pool;
 };
