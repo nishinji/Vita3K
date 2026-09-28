@@ -9,6 +9,7 @@ add_library(
 	src/instrset_detect.cpp
 	src/logging.cpp
 	src/net_utils.cpp
+	src/precise_sleep.cpp
 	src/string_utils.cpp
 	src/sysinfo.cpp
 	src/tracy.cpp

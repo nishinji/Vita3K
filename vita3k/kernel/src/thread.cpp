@@ -24,6 +24,7 @@
 #include <util/align.h>
 
 #include <util/log.h>
+#include <util/precise_sleep.h>
 
 #include <algorithm>
 #include <cassert>
@@ -566,7 +567,19 @@ WaitResult ThreadState::wait(WaitTarget target, Deadline deadline) {
     bool satisfied = true;
     if (deadline == Deadline::max())
         wait_cv.wait(lock, woken);
-    else
+    else if (target.type == SCE_KERNEL_WAITTYPE_DELAY) {
+        // condition variable timeouts can overshoot by 2 ms (Windows), which breaks games pacing frames with delays
+        constexpr auto coarse_margin = std::chrono::milliseconds(2);
+        const bool long_delay = deadline - Deadline::clock::now() >= std::chrono::milliseconds(1);
+        satisfied = wait_cv.wait_until(lock, deadline - coarse_margin, woken);
+        if (!satisfied) {
+            lock.unlock();
+            // spinning through short polling delays would waste a host core
+            util::sleep_until_precise(deadline, long_delay);
+            lock.lock();
+            satisfied = woken();
+        }
+    } else
         satisfied = wait_cv.wait_until(lock, deadline, woken);
     // A thread something holds goes on to its gate, which keeps it from its callbacks and its code
     update_status(ThreadStatus::running);
