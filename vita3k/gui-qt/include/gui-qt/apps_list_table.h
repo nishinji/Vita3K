@@ -23,6 +23,7 @@
 #include <util/fs.h>
 
 #include <QTableWidget>
+#include <QThreadPool>
 
 #include <optional>
 #include <unordered_map>
@@ -102,4 +103,6 @@ private:
     std::optional<int> m_compat_filter;
     std::optional<int> m_parental_filter;
     std::unordered_map<std::string, quint64> m_size_cache;
+    // walking every app folder must not compete with a running game
+    QThreadPool m_size_pool;
 };
