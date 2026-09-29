@@ -17,6 +17,7 @@
 
 #include <renderer/vulkan/pipeline_cache.h>
 
+#include <renderer/vulkan/functions.h>
 #include <renderer/vulkan/gxm_to_vulkan.h>
 #include <renderer/vulkan/state.h>
 #include <renderer/vulkan/types.h>
@@ -676,6 +677,16 @@ vk::PipelineVertexInputStateCreateInfo PipelineCache::get_vertex_input_state(con
     VertexProgram *vkvert = vertex_program.renderer_data.get();
 
     uint32_t used_streams = 0;
+    uint32_t repacked_streams = 0;
+    std::array<std::vector<uint32_t>, SCE_GXM_MAX_VERTEX_STREAMS> repacked_offsets;
+    std::array<uint32_t, SCE_GXM_MAX_VERTEX_STREAMS> repacked_strides{};
+    // with memory mapping the guest buffer is read in place and cannot be repacked
+    if (!state.features.enable_memory_mapping) {
+        for (uint32_t stream_index = 0; stream_index < SCE_GXM_MAX_VERTEX_STREAMS; stream_index++) {
+            if (get_repacked_stream_layout(vertex_program, stream_index, repacked_offsets[stream_index], repacked_strides[stream_index]))
+                repacked_streams |= (1 << stream_index);
+        }
+    }
 
     for (const SceGxmVertexAttribute &attribute : vertex_program.attributes) {
         if (!vkvert->attribute_infos.contains(attribute.regIndex))
@@ -745,12 +756,15 @@ vk::PipelineVertexInputStateCreateInfo PipelineCache::get_vertex_input_state(con
             }
         }
 
+        uint32_t offset = attribute.offset;
+        if (repacked_streams & (1 << attribute.streamIndex))
+            offset = repacked_offsets[attribute.streamIndex][&attribute - vertex_program.attributes.data()];
         for (uint32_t i = 0; i < array_size; i++) {
             attr_descr.push_back(vk::VertexInputAttributeDescription{
                 .location = info.location + i,
                 .binding = attribute.streamIndex,
                 .format = format,
-                .offset = attribute.offset + i * array_element_size });
+                .offset = offset + i * array_element_size });
         }
     }
 
@@ -762,11 +776,7 @@ vk::PipelineVertexInputStateCreateInfo PipelineCache::get_vertex_input_state(con
 
         const bool is_instanced = gxm::is_stream_instancing(static_cast<SceGxmIndexSource>(stream.indexSource));
 
-#ifdef __APPLE__
-        const uint32_t stride = align(stream.stride, 4);
-#else
-        const uint32_t stride = stream.stride;
-#endif
+        const uint32_t stride = (repacked_streams & (1 << stream_index)) ? repacked_strides[stream_index] : stream.stride;
         binding_descr.push_back(vk::VertexInputBindingDescription{
             .binding = stream_index,
             .stride = stride,
