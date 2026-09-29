@@ -112,6 +112,9 @@ static GLenum translate_stencil_func(SceGxmStencilFunc stencil_func) {
 
 void sync_mask(const GLState &state, GLContext &context, const MemState &mem) {
     GLubyte initial_byte = context.record.depth_stencil_surface.mask ? 0xFF : 0;
+    if (context.render_target->mask_clear_value == initial_byte)
+        return;
+    context.render_target->mask_clear_value = initial_byte;
 
 #ifdef __ANDROID__
     auto width = context.render_target->width;

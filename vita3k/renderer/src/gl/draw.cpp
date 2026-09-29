@@ -153,6 +153,7 @@ void draw(GLState &renderer, GLContext &context, const FeatureState &features, S
     }
 
     if (context.record.is_maskupdate) {
+        context.render_target->mask_clear_value = -1;
         // Tests bypassed in maskupdate
         glDisable(GL_DEPTH_TEST);
         glDisable(GL_STENCIL_TEST);
