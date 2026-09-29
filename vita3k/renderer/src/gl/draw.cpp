@@ -195,6 +195,10 @@ void draw(GLState &renderer, GLContext &context, const FeatureState &features, S
     std::memcpy(index_gpu_ptr.first, indices, index_buffer_size);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, context.index_stream_ring_buffer.handle());
 
+    // the shader stores the blended color itself and has no output, so the fixed-function write would clobber it
+    if (fragment_program_gxp.is_frag_color_used() && features.should_use_shader_interlock())
+        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+
     if (fragment_program_gxp.is_native_color()) {
         if (features.should_use_shader_interlock() && !config.spirv_shader) {
             glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
