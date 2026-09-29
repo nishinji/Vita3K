@@ -55,6 +55,13 @@ static GLenum translate_primitive(SceGxmPrimitiveType primType) {
     return GL_TRIANGLES;
 }
 
+static void recompile_fragment_shaders(GLState &renderer, GLContext &context) {
+    renderer.update_shader_version();
+    renderer.fragment_shader_cache.clear();
+    renderer.program_cache.clear();
+    context.last_draw_fragment_program_hash = {};
+}
+
 void draw(GLState &renderer, GLContext &context, const FeatureState &features, SceGxmPrimitiveType type, SceGxmIndexFormat format, void *indices, size_t count, uint32_t instance_count,
     MemState &mem, const Config &config) {
     R_PROFILE(__func__);
@@ -74,10 +81,15 @@ void draw(GLState &renderer, GLContext &context, const FeatureState &features, S
     if (renderer.features.use_mask_bit && gxm_fragment_program.is_maskupdate && !renderer.mask_used) {
         LOG_INFO("The game updates the mask, recompiling shaders with the mask test");
         renderer.mask_used = true;
-        renderer.shader_version = fmt::format("v{}", shader::CURRENT_VERSION);
-        renderer.fragment_shader_cache.clear();
-        renderer.program_cache.clear();
-        context.last_draw_fragment_program_hash = {};
+        recompile_fragment_shaders(renderer, context);
+    }
+
+    const bool front_disabled = context.record.front_side_fragment_program_mode == SCE_GXM_FRAGMENT_PROGRAM_DISABLED;
+    const bool back_disabled = (context.record.two_sided == SCE_GXM_TWO_SIDED_DISABLED) ? front_disabled : context.record.back_side_fragment_program_mode == SCE_GXM_FRAGMENT_PROGRAM_DISABLED;
+    if (front_disabled != back_disabled && !renderer.side_disable_used) {
+        LOG_INFO("The game disables the fragment program of one side, recompiling shaders to discard it");
+        renderer.side_disable_used = true;
+        recompile_fragment_shaders(renderer, context);
     }
 
     // Trying to cache: the last time vs this time shader pair. Does it different somehow?
