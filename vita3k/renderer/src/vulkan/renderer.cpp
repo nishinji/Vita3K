@@ -648,6 +648,8 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
 #endif
             // used for coherent framebuffer fetch
             { VK_EXT_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_EXTENSION_NAME, &support_rasterized_order_access },
+            // fewer pipelines to compile
+            { vk::EXTExtendedDynamicStateExtensionName, &support_extended_dynamic_state },
 #ifdef __ANDROID__
             // dependencies of VK_ANDROID_external_memory_android_hardware_buffer
             { VK_KHR_BIND_MEMORY_2_EXTENSION_NAME, &temp_bool },
@@ -752,7 +754,13 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
             features.support_shader_interlock = support_shader_interlock;
         }
 
+        if (support_extended_dynamic_state) {
+            auto props = physical_device.getFeatures2KHR<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>();
+            support_extended_dynamic_state = static_cast<bool>(props.get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState);
+        }
+
         vk::StructureChain<vk::DeviceCreateInfo,
+            vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
             vk::PhysicalDeviceBufferDeviceAddressFeatures,
             vk::PhysicalDeviceUniformBufferStandardLayoutFeatures,
             vk::PhysicalDeviceShaderFloat16Int8Features,
@@ -761,6 +769,8 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
             device_info{
                 vk::DeviceCreateInfo{
                     .pEnabledFeatures = &enabled_features },
+                vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT{
+                    .extendedDynamicState = VK_TRUE },
                 vk::PhysicalDeviceBufferDeviceAddressFeatures{
                     .bufferDeviceAddress = VK_TRUE },
                 vk::PhysicalDeviceUniformBufferStandardLayoutFeatures{
@@ -790,6 +800,9 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
 
         if (!support_shader_interlock)
             device_info.unlink<vk::PhysicalDeviceFragmentShaderInterlockFeaturesEXT>();
+
+        if (!support_extended_dynamic_state)
+            device_info.unlink<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>();
 
         try {
             device = physical_device.createDevice(device_info.get());

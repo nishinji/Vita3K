@@ -883,19 +883,24 @@ vk::Pipeline PipelineCache::compile_pipeline(SceGxmPrimitiveType type, vk::Rende
 
     // all of these can be changed at any time using the vita graphics api (like opengl)
     // Because each one can take a lot of different values, it's better to set them as dynamic
-    const std::array dynamic_states = {
+    std::vector<vk::DynamicState> dynamic_states = {
         vk::DynamicState::eViewport,
         vk::DynamicState::eScissor,
         vk::DynamicState::eStencilCompareMask,
         vk::DynamicState::eStencilReference,
         vk::DynamicState::eStencilWriteMask,
         vk::DynamicState::eDepthBias,
-        vk::DynamicState::eLineWidth,
     };
+    if (state.physical_device_features.wideLines)
+        dynamic_states.push_back(vk::DynamicState::eLineWidth);
+    if (state.support_extended_dynamic_state) {
+        dynamic_states.push_back(vk::DynamicState::eCullModeEXT);
+        dynamic_states.push_back(vk::DynamicState::eDepthWriteEnableEXT);
+        dynamic_states.push_back(vk::DynamicState::eDepthCompareOpEXT);
+        dynamic_states.push_back(vk::DynamicState::eStencilOpEXT);
+    }
     vk::PipelineDynamicStateCreateInfo dynamic_info{};
     dynamic_info.setDynamicStates(dynamic_states);
-    if (!state.physical_device_features.wideLines)
-        dynamic_info.dynamicStateCount--;
 
     // we still need to specify the viewport and scissor count even though they are dynamic
     vk::PipelineViewportStateCreateInfo viewport{
@@ -931,7 +936,24 @@ vk::Pipeline PipelineCache::compile_pipeline(SceGxmPrimitiveType type, vk::Rende
 vk::Pipeline PipelineCache::retrieve_pipeline(VKContext &context, SceGxmPrimitiveType &type, bool consider_for_async, MemState &mem) {
     const GxmRecordState &record = context.record;
     // get the hash of the current context
-    uint64_t key = XXH3_64bits(&record, record_pipeline_len);
+    uint64_t key;
+    if (state.support_extended_dynamic_state) {
+        // leave the dynamic state out of the key
+        alignas(8) uint8_t key_data[record_pipeline_len];
+        memcpy(key_data, &record, record_pipeline_len);
+        GxmRecordState &key_state = *reinterpret_cast<GxmRecordState *>(key_data);
+        key_state.cull_mode = SCE_GXM_CULL_NONE;
+        key_state.front_stencil_state_op = {};
+        key_state.back_stencil_state_op = {};
+        key_state.front_depth_func = SCE_GXM_DEPTH_FUNC_LESS_EQUAL;
+        key_state.back_depth_func = SCE_GXM_DEPTH_FUNC_LESS_EQUAL;
+        key_state.front_depth_write_mode = SCE_GXM_DEPTH_WRITE_ENABLED;
+        key_state.back_depth_write_mode = SCE_GXM_DEPTH_WRITE_ENABLED;
+        key_state.two_sided = SCE_GXM_TWO_SIDED_DISABLED;
+        key = XXH3_64bits(key_data, record_pipeline_len);
+    } else {
+        key = XXH3_64bits(&record, record_pipeline_len);
+    }
 
     // add the hash of the blending
     SceGxmFragmentProgram &fragment_program_gxm = *record.fragment_program.get(mem);

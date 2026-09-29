@@ -404,6 +404,9 @@ void draw(VKContext &context, SceGxmPrimitiveType type, SceGxmIndexFormat format
             if (new_pipeline != nullptr)
                 context.render_cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, context.current_pipeline);
         }
+
+        if (context.state.support_extended_dynamic_state)
+            sync_dynamic_pipeline_state(context);
     }
 
     // can happen with asynchronous pipeline compilation

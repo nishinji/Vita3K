@@ -259,6 +259,21 @@ void sync_visibility_index(VKContext &context, bool enable, uint32_t index, bool
     context.is_query_op_increment = is_increment;
 }
 
+void sync_dynamic_pipeline_state(VKContext &context) {
+    const GxmRecordState &record = context.record;
+    vk::CommandBuffer &cmd = context.render_cmd;
+    cmd.setCullModeEXT(translate_cull_mode(record.cull_mode));
+    cmd.setDepthWriteEnableEXT(record.front_depth_write_mode == SCE_GXM_DEPTH_WRITE_ENABLED);
+    cmd.setDepthCompareOpEXT(translate_depth_func(record.front_depth_func));
+
+    const GxmStencilStateOp &front = record.front_stencil_state_op;
+    const GxmStencilStateOp &back = (record.two_sided == SCE_GXM_TWO_SIDED_ENABLED) ? record.back_stencil_state_op : front;
+    cmd.setStencilOpEXT(vk::StencilFaceFlagBits::eFront, translate_stencil_op(front.stencil_fail), translate_stencil_op(front.depth_pass),
+        translate_stencil_op(front.depth_fail), translate_stencil_func(front.func));
+    cmd.setStencilOpEXT(vk::StencilFaceFlagBits::eBack, translate_stencil_op(back.stencil_fail), translate_stencil_op(back.depth_pass),
+        translate_stencil_op(back.depth_fail), translate_stencil_func(back.func));
+}
+
 void refresh_pipeline(VKContext &context) {
     context.refresh_pipeline = true;
 }
