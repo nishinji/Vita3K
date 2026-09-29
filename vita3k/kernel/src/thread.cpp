@@ -610,10 +610,10 @@ SceInt32 ThreadState::sleep(std::unique_lock<std::mutex> &lock, Deadline deadlin
     else if (is_delay) {
         // condition variable timeouts can overshoot by 2 ms (Windows), which breaks games pacing frames with delays
         constexpr auto coarse_margin = std::chrono::milliseconds(2);
-        const bool long_delay = deadline - Deadline::clock::now() >= std::chrono::milliseconds(1);
+        const bool long_delay = deadline - Deadline::clock::now() >= std::chrono::milliseconds(4);
         if (!cv.wait_until(lock, deadline - coarse_margin, woken)) {
             lock.unlock();
-            // spinning through short polling delays would waste a host core
+            // only frame pacing needs that accuracy; spinning through polling delays would waste a host core
             util::sleep_until_precise(deadline, long_delay);
             lock.lock();
         }

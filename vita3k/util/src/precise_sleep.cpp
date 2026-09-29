@@ -17,6 +17,7 @@
 
 #include <util/precise_sleep.h>
 
+#include <algorithm>
 #include <thread>
 
 #ifdef _WIN32
@@ -54,16 +55,25 @@ void sleep_until_precise(std::chrono::steady_clock::time_point deadline, bool sp
     using namespace std::chrono;
 #ifdef _WIN32
     thread_local WaitableTimer timer;
-    // a high-resolution timer usually wakes 0.25 ms late
-    constexpr auto spin_time = microseconds(400);
-    const auto remaining = deadline - steady_clock::now();
+    // how late the timer wakes up varies between machines, so learn it and only spin through that part
+    thread_local nanoseconds timer_lateness = microseconds(300);
+    constexpr auto spin_margin = microseconds(50);
+    const auto now = steady_clock::now();
+    const auto remaining = deadline - now;
     if (!spin_end) {
         if (remaining > nanoseconds::zero())
             timer.wait(remaining);
         return;
     }
-    if (remaining > spin_time)
-        timer.wait(remaining - spin_time);
+    const auto sleep_time = remaining - timer_lateness - spin_margin;
+    if (sleep_time > nanoseconds::zero()) {
+        timer.wait(sleep_time);
+        // short waits are dominated by the timer granularity and would inflate the estimate
+        if (sleep_time >= microseconds(500)) {
+            const auto lateness = steady_clock::now() - (now + sleep_time);
+            timer_lateness = std::clamp<nanoseconds>((timer_lateness * 7 + lateness) / 8, microseconds(20), milliseconds(1));
+        }
+    }
     while (steady_clock::now() < deadline)
         std::this_thread::yield();
 #else
