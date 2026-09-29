@@ -58,4 +58,7 @@ void sync_visibility_index(VKContext &context, bool enable, uint32_t index, bool
 
 void refresh_pipeline(VKContext &context);
 
+// Vulkan needs vertex attributes aligned to their component size and gxm does not, false when the stream can be used as is
+bool get_repacked_stream_layout(const SceGxmVertexProgram &program, uint32_t stream_index, std::vector<uint32_t> &offsets, uint32_t &stride);
+
 } // namespace renderer::vulkan

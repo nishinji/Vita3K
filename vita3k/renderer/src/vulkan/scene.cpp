@@ -100,22 +100,84 @@ void mid_scene_flush(VKContext &context, const SceGxmNotification notification) 
     }
 }
 
-#ifdef __APPLE__
-// restride vertex attribute binding strides to multiple of 4
-// needed for metal because it only allows multiples of 4.
-void restride_stream(const uint8_t *&stream, uint32_t &size, uint32_t stride) {
-    const uint32_t new_stride = align(stride, 4);
-    const uint32_t nb_vertex_input = ((size + stride - 1) / stride);
-
-    uint8_t *new_data = new uint8_t[nb_vertex_input * new_stride];
-    for (uint32_t i = 0; i < nb_vertex_input; i++) {
-        memcpy(new_data + new_stride * i, stream + stride * i, stride);
-    }
-
-    stream = new_data;
-    size = nb_vertex_input * new_stride;
+static uint32_t attribute_byte_size(const SceGxmVertexAttribute &attribute) {
+    return gxm::attribute_format_size(static_cast<SceGxmAttributeFormat>(attribute.format)) * attribute.componentCount;
 }
+
+bool get_repacked_stream_layout(const SceGxmVertexProgram &program, uint32_t stream_index, std::vector<uint32_t> &offsets, uint32_t &stride) {
+    const VertexProgram *vkvert = program.renderer_data.get();
+    const uint32_t src_stride = program.streams[stream_index].stride;
+#ifdef __APPLE__
+    // Metal also needs strides to be multiples of 4
+    bool aligned = src_stride % 4 == 0;
+#else
+    bool aligned = true;
 #endif
+    bool used = false;
+    for (const SceGxmVertexAttribute &attribute : program.attributes) {
+        if (attribute.streamIndex != stream_index || !vkvert->attribute_infos.contains(attribute.regIndex))
+            continue;
+
+        used = true;
+        const shader::usse::AttributeInformation &info = vkvert->attribute_infos.at(attribute.regIndex);
+        uint32_t component_size = gxm::attribute_format_size(static_cast<SceGxmAttributeFormat>(attribute.format));
+        if (info.regformat) {
+            // the fetch format is chosen from the shader type, see get_vertex_input_state
+            switch (info.gxm_type) {
+            case SCE_GXM_PARAMETER_TYPE_U8:
+            case SCE_GXM_PARAMETER_TYPE_S8:
+            case SCE_GXM_PARAMETER_TYPE_C10:
+                component_size = 1;
+                break;
+            case SCE_GXM_PARAMETER_TYPE_U16:
+            case SCE_GXM_PARAMETER_TYPE_S16:
+            case SCE_GXM_PARAMETER_TYPE_F16:
+                component_size = 2;
+                break;
+            default:
+                component_size = 4;
+                break;
+            }
+        }
+        if (component_size > 1 && (attribute.offset % component_size != 0 || src_stride % component_size != 0))
+            aligned = false;
+    }
+    if (!used || aligned)
+        return false;
+
+    offsets.assign(program.attributes.size(), 0);
+    stride = 0;
+    for (size_t i = 0; i < program.attributes.size(); i++) {
+        const SceGxmVertexAttribute &attribute = program.attributes[i];
+        if (attribute.streamIndex != stream_index || !vkvert->attribute_infos.contains(attribute.regIndex))
+            continue;
+        offsets[i] = stride;
+        // room for an rgb attribute fetched as rgba
+        stride += align(attribute_byte_size(attribute), 4) + 4;
+    }
+    return true;
+}
+
+static std::vector<uint8_t> repack_stream(const SceGxmVertexProgram &program, uint32_t stream_index, const uint8_t *src, uint32_t src_size, const std::vector<uint32_t> &offsets, uint32_t stride) {
+    const VertexProgram *vkvert = program.renderer_data.get();
+    const uint32_t src_stride = std::max<uint32_t>(program.streams[stream_index].stride, 1);
+    const uint32_t vertex_count = (src_size + src_stride - 1) / src_stride;
+
+    std::vector<uint8_t> dst(static_cast<size_t>(vertex_count) * stride, 0);
+    for (size_t i = 0; i < program.attributes.size(); i++) {
+        const SceGxmVertexAttribute &attribute = program.attributes[i];
+        if (attribute.streamIndex != stream_index || !vkvert->attribute_infos.contains(attribute.regIndex))
+            continue;
+        const uint32_t size = attribute_byte_size(attribute);
+        for (uint32_t v = 0; v < vertex_count; v++) {
+            const uint32_t src_offset = v * src_stride + attribute.offset;
+            if (src_offset >= src_size)
+                break;
+            memcpy(&dst[static_cast<size_t>(v) * stride + offsets[i]], src + src_offset, std::min(size, src_size - src_offset));
+        }
+    }
+    return dst;
+}
 
 // when needed, how many descriptor of the given size we allocate for each frame at once
 static constexpr uint32_t DESCRIPTOR_PACK_SIZE = 64;
@@ -298,22 +360,16 @@ static void bind_vertex_streams(VKContext &context, MemState &mem, uint32_t inst
                 context.vertex_stream_buffers[i] = buffer;
             } else {
                 const uint8_t *stream = state.vertex_streams[i].data.get(mem);
-                uint32_t stream_size = state.vertex_streams[i].size;
-#ifdef __APPLE__
-                // Vulkan allows any stride, but Metal only allows multiples of 4.
-                const bool restride = vertex_program.streams[i].stride % 4 != 0;
-                if (restride) {
-                    restride_stream(stream, stream_size, vertex_program.streams[i].stride);
+                const uint32_t stream_size = state.vertex_streams[i].size;
+                std::vector<uint32_t> repacked_offsets;
+                uint32_t repacked_stride;
+                if (get_repacked_stream_layout(vertex_program, i, repacked_offsets, repacked_stride)) {
+                    const std::vector<uint8_t> repacked = repack_stream(vertex_program, i, stream, stream_size, repacked_offsets, repacked_stride);
+                    context.vertex_stream_ring_buffer.allocate(context.prerender_cmd, static_cast<uint32_t>(repacked.size()), repacked.data());
+                } else {
+                    context.vertex_stream_ring_buffer.allocate(context.prerender_cmd, stream_size, stream);
                 }
-#endif
-                context.vertex_stream_ring_buffer.allocate(context.prerender_cmd, stream_size, stream);
                 context.vertex_stream_offsets[i] = context.vertex_stream_ring_buffer.data_offset;
-
-#ifdef __APPLE__
-                if (restride) {
-                    delete[] stream;
-                }
-#endif
             }
 
             state.vertex_streams[i].data = nullptr;
