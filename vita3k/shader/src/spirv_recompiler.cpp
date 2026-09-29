@@ -1923,7 +1923,7 @@ static SpirvCode convert_gxp_to_spirv_impl(const SceGxmProgram &program, const s
 
     if (!translation_state.is_maskupdate) {
         if (program.is_fragment()) {
-            if (!translation_state.is_vulkan)
+            if (!translation_state.is_vulkan && features.discard_disabled_side)
                 begin_hook_func = make_frag_initialize_function(b, translation_state);
 
             end_hook_func = make_frag_finalize_function(b, parameters, program, utils, features, translation_state);
