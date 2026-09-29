@@ -368,7 +368,7 @@ ExitCode init_config(Config &cfg, int argc, char **argv, const Root &root_paths,
     auto config = app.add_option_group("Configuration", "Modify Vita3K's config.yml file");
     config->add_flag("--archive-log,-A", command_line.archive_log, "Make a duplicate of the log file with TITLE_ID and Game ID as title")
         ->group("Logging");
-    config->add_option("--backend-renderer,-B", command_line.backend_renderer, "Renderer backend to use")
+    const auto backend_option = config->add_option("--backend-renderer,-B", command_line.backend_renderer, "Renderer backend to use")
         ->ignore_case()->check(CLI::IsMember(std::set<std::string>{ "OpenGL", "Vulkan" }))->group("Vita Emulation");
     config->add_flag("--color-surface-debug,-C", command_line.color_surface_debug, "Save color surfaces")
         ->group("Vita Emulation");
@@ -401,6 +401,11 @@ ExitCode init_config(Config &cfg, int argc, char **argv, const Root &root_paths,
             return InitConfigFailed;
         }
     }
+
+    // merge() treats default values as unset, so remember an explicit request for the default backend
+    std::optional<std::string> cli_backend_renderer;
+    if (backend_option->count() > 0)
+        cli_backend_renderer = command_line.backend_renderer;
 
     if (!app.get_help_ptr()->empty()) {
         std::cout << app.help() << std::endl;
@@ -453,6 +458,8 @@ ExitCode init_config(Config &cfg, int argc, char **argv, const Root &root_paths,
 
     // Merge configurations
     merge(cfg, command_line);
+    if (cli_backend_renderer)
+        cfg.backend_renderer = *cli_backend_renderer;
     // In portable mode, override the VitaFS path to be within the portable directory
     if (portable || cfg.vita_fs_path.empty())
         cfg.set_vita_fs_path(root_paths.get_vita_fs_path());
