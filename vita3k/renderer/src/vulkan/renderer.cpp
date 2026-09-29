@@ -739,6 +739,8 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
             auto props = physical_device.getFeatures2KHR<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceShaderFloat16Int8Features>();
             support_fsr = static_cast<bool>(props.get<vk::PhysicalDeviceShaderFloat16Int8Features>().shaderFloat16);
         }
+        // shaderFloat16 is only enabled along with FSR
+        features.use_f16_conversion = support_fsr && physical_device_properties.vendorID == 0x1002;
 
         if (support_rasterized_order_access) {
             auto props = physical_device.getFeatures2KHR<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT>();
@@ -1254,6 +1256,7 @@ uint32_t VKState::get_features_mask() {
             bool use_memory_mapping : 1;
             bool use_rgb_attributes : 1;
             bool use_scaled_attributes : 1;
+            bool use_f16_conversion : 1;
         };
         uint32_t value;
     } features_mask;
@@ -1265,6 +1268,7 @@ uint32_t VKState::get_features_mask() {
     features_mask.use_memory_mapping = features.enable_memory_mapping;
     features_mask.use_rgb_attributes = features.support_rgb_attributes;
     features_mask.use_scaled_attributes = pipeline_cache.support_scaled_vertex_attribute;
+    features_mask.use_f16_conversion = features.use_f16_conversion;
 
     return features_mask.value;
 }
