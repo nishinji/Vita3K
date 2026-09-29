@@ -65,8 +65,10 @@ struct GLState : public renderer::State {
     ShaderCache fragment_shader_cache;
     ShaderCache vertex_shader_cache;
     ProgramCache program_cache;
-    // shaders skip the per-pixel mask test (which disables early depth) until the game updates the mask
+    // per-pixel tests that may discard disable early depth, so shaders only get them once the game needs them
     bool mask_used = false;
+    bool side_disable_used = false;
+    void update_shader_version();
 
     GLTextureCache texture_cache;
     GLSurfaceCache surface_cache;
