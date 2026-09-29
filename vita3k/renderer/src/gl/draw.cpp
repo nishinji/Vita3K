@@ -153,6 +153,7 @@ void draw(GLState &renderer, GLContext &context, const FeatureState &features, S
     }
 
     if (context.record.is_maskupdate) {
+        context.render_target->mask_clear_value = -1;
         // Tests bypassed in maskupdate
         glDisable(GL_DEPTH_TEST);
         glDisable(GL_STENCIL_TEST);
@@ -230,6 +231,8 @@ void draw(GLState &renderer, GLContext &context, const FeatureState &features, S
     if (context.record.is_maskupdate) {
         sync_depth_data(context.record);
         sync_stencil_data(context.record, mem);
+        sync_stencil_func(context.record.back_stencil_state_op, context.record.back_stencil_state_values, mem, true);
+        sync_stencil_func(context.record.front_stencil_state_op, context.record.front_stencil_state_values, mem, false);
         glBindFramebuffer(GL_FRAMEBUFFER, context.current_framebuffer);
     }
 
