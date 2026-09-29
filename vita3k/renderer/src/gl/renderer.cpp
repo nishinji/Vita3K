@@ -43,6 +43,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <future>
 #include <mutex>
 #include <string_view>
 
@@ -899,6 +900,31 @@ void GLState::done_current() {
 }
 
 std::vector<uint32_t> GLState::dump_frame(DisplayState &display, uint32_t &width, uint32_t &height) {
+    if (render_thread && std::this_thread::get_id() != render_thread->get_id()) {
+        // screenshots are requested from the UI thread, which has no GL context
+        struct Result {
+            std::vector<uint32_t> frame;
+            uint32_t width = 0;
+            uint32_t height = 0;
+        };
+        auto promise = std::make_shared<std::promise<Result>>();
+        auto future = promise->get_future();
+        {
+            std::lock_guard<std::mutex> guard(render_tasks_mutex);
+            render_tasks.push_back([this, &display, promise] {
+                Result result;
+                result.frame = dump_frame(display, result.width, result.height);
+                promise->set_value(std::move(result));
+            });
+        }
+        if (future.wait_for(std::chrono::seconds(2)) != std::future_status::ready)
+            return {};
+        Result result = future.get();
+        width = result.width;
+        height = result.height;
+        return std::move(result.frame);
+    }
+
     DisplayFrameInfo frame;
     {
         std::lock_guard<std::mutex> guard(display.display_info_mutex);
