@@ -127,6 +127,9 @@ struct GLRenderTarget : public renderer::RenderTarget {
     GLObjectArray<1> masktexture;
     GLObjectArray<2> attachments;
 
+    // the mask is only written by mask update draws, so clearing it again to the same value is useless
+    mutable int mask_clear_value = -1;
+
     ~GLRenderTarget() override = default;
 };
 } // namespace renderer::gl
