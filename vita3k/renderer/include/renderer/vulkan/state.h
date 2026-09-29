@@ -116,6 +116,8 @@ struct VKState : public renderer::State {
     bool support_standard_layout = false;
     bool support_rasterized_order_access = false;
     bool support_native_rgba4_surface = false;
+    // cull mode, depth write/compare and stencil ops are set per draw instead of being baked in pipelines
+    bool support_extended_dynamic_state = false;
     LinuxSurfaceType linux_surface_type = LinuxSurfaceType::Unknown;
 
 #ifdef __ANDROID__

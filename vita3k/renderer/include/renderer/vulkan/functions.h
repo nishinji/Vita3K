@@ -45,6 +45,7 @@ void set_uniform_buffer(VKContext &context, MemState &mem, const ShaderProgram *
 void sync_clipping(VKContext &context);
 void sync_stencil_func(VKContext &context, const bool is_back);
 void sync_depth_bias(VKContext &context);
+void sync_dynamic_pipeline_state(VKContext &context);
 void sync_depth_data(VKContext &context);
 void sync_stencil_data(VKContext &context, const MemState &mem);
 void sync_point_line_width(VKContext &context, const bool is_front);
