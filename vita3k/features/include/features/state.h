@@ -30,6 +30,7 @@ struct FeatureState {
     bool enable_memory_mapping = false; ///< Is the host GPU memory directly mapped with gxm memory?
     bool support_scaled_attribute_formats = true; // can we pass integer to the shader and read them as floats? This is not supported on some Android GPUs
     bool use_texture_viewport = false; ///< Are we using texture viewports in the shader
+    bool use_f16_conversion = false; ///< Vulkan: convert halves with OpFConvert, the AMD compiler crashes on some packHalf2x16/unpackHalf2x16 chains
     bool discard_disabled_side = true; ///< OpenGL only: discard the fragments of a side whose fragment program is disabled
 
     bool is_programmable_blending_supported() const {
