@@ -464,8 +464,15 @@ static spv::Function *make_f16_unpack_func(spv::Builder &b, const SpirvUtilFunct
 
     spv::Id extracted = f16_unpack_func->getParamId(0);
 
-    extracted = b.createUnaryOp(spv::OpBitcast, type_ui32, extracted);
-    extracted = b.createBuiltinCall(type_f32_v2, utils.std_builtins, GLSLstd450UnpackHalf2x16, { extracted });
+    if (features.use_f16_conversion) {
+        b.addCapability(spv::CapabilityFloat16);
+        const spv::Id type_f16_v2 = b.makeVectorType(b.makeFloatType(16), 2);
+        extracted = b.createUnaryOp(spv::OpBitcast, type_f16_v2, extracted);
+        extracted = b.createUnaryOp(spv::OpFConvert, type_f32_v2, extracted);
+    } else {
+        extracted = b.createUnaryOp(spv::OpBitcast, type_ui32, extracted);
+        extracted = b.createBuiltinCall(type_f32_v2, utils.std_builtins, GLSLstd450UnpackHalf2x16, { extracted });
+    }
 
     b.makeReturn(false, extracted);
     b.setBuildPoint(last_build_point);
@@ -491,8 +498,14 @@ static spv::Function *make_f16_pack_func(spv::Builder &b, const SpirvUtilFunctio
     f16_pack_func->addParamPrecision(0, spv::DecorationRelaxedPrecision);
     spv::Id extracted = f16_pack_func->getParamId(0);
 
-    // use packHalf2x16
-    extracted = b.createBuiltinCall(type_ui32, utils.std_builtins, GLSLstd450PackHalf2x16, { extracted });
+    if (features.use_f16_conversion) {
+        b.addCapability(spv::CapabilityFloat16);
+        const spv::Id type_f16_v2 = b.makeVectorType(b.makeFloatType(16), 2);
+        extracted = b.createUnaryOp(spv::OpFConvert, type_f16_v2, extracted);
+    } else {
+        // use packHalf2x16
+        extracted = b.createBuiltinCall(type_ui32, utils.std_builtins, GLSLstd450PackHalf2x16, { extracted });
+    }
     extracted = b.createUnaryOp(spv::OpBitcast, type_f32, extracted);
 
     b.makeReturn(false, extracted);
