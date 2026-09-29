@@ -258,7 +258,7 @@ bool GLState::init() {
         LOG_WARN("Failed to initialize overlay renderer, overlays will be disabled");
     }
 
-    shader_version = fmt::format("v{}", shader::CURRENT_VERSION);
+    shader_version = fmt::format("v{}{}", shader::CURRENT_VERSION, features.use_mask_bit ? "nm" : "");
 
     return true;
 }
