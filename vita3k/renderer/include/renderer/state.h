@@ -125,6 +125,9 @@ struct State {
 
     std::unique_ptr<std::thread> render_thread;
     std::atomic<bool> render_abort{ false };
+    // work that needs the render thread's GL context, requested from other threads
+    std::mutex render_tasks_mutex;
+    std::vector<std::function<void()>> render_tasks;
 
     std::vector<ShadersHash> precompile_queue;
     bool precompile_requested = false;

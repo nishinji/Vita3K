@@ -291,6 +291,14 @@ static void render_loop(renderer::State &state, DisplayState &display, GxmState 
         if (state.render_abort.load(std::memory_order_relaxed))
             break;
 
+        std::vector<std::function<void()>> tasks;
+        {
+            std::lock_guard<std::mutex> guard(state.render_tasks_mutex);
+            tasks.swap(state.render_tasks);
+        }
+        for (auto &task : tasks)
+            task();
+
         // OpenGL with vsync returns whenever the queue is empty; presenting the same frame again only burns CPU
         if (!state.should_display && !state.async_flip_requested.load(std::memory_order_relaxed)
             && state.current_backend == Backend::OpenGL && config.current_config.v_sync
