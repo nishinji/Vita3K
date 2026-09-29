@@ -97,6 +97,35 @@ void GLTextureCache::select(size_t index, const SceGxmTexture &texture) {
     glBindTexture(get_gl_texture_type(texture), gl_texture);
 }
 
+// from EXT_texture_sRGB, which glad does not define
+constexpr GLenum COMPRESSED_SRGB_ALPHA_S3TC_DXT1 = 0x8C4D;
+constexpr GLenum COMPRESSED_SRGB_ALPHA_S3TC_DXT3 = 0x8C4E;
+constexpr GLenum COMPRESSED_SRGB_ALPHA_S3TC_DXT5 = 0x8C4F;
+
+// gamma textures hold sRGB data that the shaders expect to sample as linear, as the Vulkan renderer does
+static GLenum linear_to_srgb(const GLenum format) {
+    switch (format) {
+    case GL_RGBA:
+    case GL_RGBA8:
+        return GL_SRGB8_ALPHA8;
+    case GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:
+        return COMPRESSED_SRGB_ALPHA_S3TC_DXT1;
+    case GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:
+        return COMPRESSED_SRGB_ALPHA_S3TC_DXT3;
+    case GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:
+        return COMPRESSED_SRGB_ALPHA_S3TC_DXT5;
+    case GL_COMPRESSED_RGBA_BPTC_UNORM:
+        return GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM;
+#define ASTC_FMT(b_x, b_y)                              case GL_COMPRESSED_RGBA_ASTC_##b_x##x##b_y:         return GL_COMPRESSED_SRGB8_ALPHA8_ASTC_##b_x##x##b_y;
+
+#include "../texture/astc_formats.inc"
+#undef ASTC_FMT
+    default:
+        LOG_WARN_ONCE("Trying to use gamma correction with non-compatible format {}", log_hex(format));
+        return format;
+    }
+}
+
 static GLenum bcn_to_rgba8(const SceGxmTextureBaseFormat format) {
     switch (format) {
     case SCE_GXM_TEXTURE_BASE_FORMAT_UBC4:
@@ -159,6 +188,8 @@ void GLTextureCache::configure_texture(const SceGxmTexture &gxm_texture) {
         int num_comp = gxm::get_num_components(base_format);
         format = (num_comp == 4) ? GL_RGBA : (num_comp == 2 ? GL_RG : GL_RED);
     }
+    if (gxm_texture.gamma_mode)
+        internal_format = linear_to_srgb(internal_format);
 
     // GXM's cube map index is same as OpenGL: right, left, top, bottom, front, back
     GLenum upload_type = GL_TEXTURE_2D;
@@ -222,7 +253,10 @@ void GLTextureCache::upload_texture_impl(SceGxmTextureBaseFormat base_format, ui
             glPixelStorei(GL_UNPACK_COMPRESSED_BLOCK_HEIGHT, block_height);
         }
 
-        const GLenum format = translate_format(base_format);
+        GLenum format = translate_format(base_format);
+        // must match the internal format given in configure_texture
+        if (current_info && current_info->texture.gamma_mode && !importing_texture)
+            format = linear_to_srgb(format);
         size_t compressed_size = renderer::texture::get_compressed_size(base_format, width, height);
         glCompressedTexSubImage2D(upload_type, mip_index, 0, 0, width, height, format, static_cast<GLsizei>(compressed_size), pixels);
 
