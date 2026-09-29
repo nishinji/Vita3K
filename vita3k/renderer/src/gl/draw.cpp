@@ -71,6 +71,15 @@ void draw(GLState &renderer, GLContext &context, const FeatureState &features, S
         return;
     }
 
+    if (renderer.features.use_mask_bit && gxm_fragment_program.is_maskupdate && !renderer.mask_used) {
+        LOG_INFO("The game updates the mask, recompiling shaders with the mask test");
+        renderer.mask_used = true;
+        renderer.shader_version = fmt::format("v{}", shader::CURRENT_VERSION);
+        renderer.fragment_shader_cache.clear();
+        renderer.program_cache.clear();
+        context.last_draw_fragment_program_hash = {};
+    }
+
     // Trying to cache: the last time vs this time shader pair. Does it different somehow?
     // If it's different, we need to switch. Else just stick to it.
     if (context.record.vertex_program.get(mem)->renderer_data->hash != context.last_draw_vertex_program_hash || context.record.fragment_program.get(mem)->renderer_data->hash != context.last_draw_fragment_program_hash) {

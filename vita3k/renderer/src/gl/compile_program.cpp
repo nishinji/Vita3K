@@ -267,7 +267,10 @@ SharedGLObject compile_program(GLState &renderer, GLContext &context, const GxmR
     context.shader_hints.color_format = state.color_surface.colorFormat;
     context.shader_hints.attributes = &vertex_program_gxm.attributes;
 
-    const SharedGLObject fragment_shader = get_or_compile_shader(fragment_program_gxm.program.get(mem), features, fragment_program.hash, renderer.fragment_shader_cache,
+    FeatureState shader_features = features;
+    shader_features.use_mask_bit = features.use_mask_bit && renderer.mask_used;
+
+    const SharedGLObject fragment_shader = get_or_compile_shader(fragment_program_gxm.program.get(mem), shader_features, fragment_program.hash, renderer.fragment_shader_cache,
         GL_FRAGMENT_SHADER, context.shader_hints, shader_cache, spirv, maskupdate, renderer.shaders_path, renderer.shaders_log_path, renderer.shader_version, renderer.shaders_count_compiled);
 
     if (!fragment_shader) {
