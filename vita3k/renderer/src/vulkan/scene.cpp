@@ -399,8 +399,9 @@ void draw(VKContext &context, SceGxmPrimitiveType type, SceGxmIndexFormat format
 
     const SceGxmFragmentProgram &gxm_fragment_program = *context.record.fragment_program.get(mem);
     const SceGxmProgram &fragment_program_gxp = *gxm_fragment_program.program.get(mem);
-    if (context.state.features.direct_fragcolor && fragment_program_gxp.is_frag_color_used()) {
+    if (context.state.features.direct_fragcolor && fragment_program_gxp.is_frag_color_used() && !context.record.skip_color_output) {
         // the fragment shader is using programmable blending with a subpass input
+        // (skipped when nothing can observe the color, the previous draws did not write any)
         vk::ImageMemoryBarrier barrier{
             .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite,
             .dstAccessMask = vk::AccessFlagBits::eInputAttachmentRead,
