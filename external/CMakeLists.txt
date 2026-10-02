@@ -33,6 +33,47 @@ check_submodules_present()
 # Set folder for external projects (for project tree in IDE)
 set(CMAKE_FOLDER externals)
 
+# Boost
+# The bundled Boost distribution ships an incomplete copy of the b2 buildsystem
+# and no CMake package, so compile the modules that aren't header only ourselves.
+if(VITA3K_USE_CUSTOM_BOOST)
+	set(BOOST_FILESYSTEM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/boost/libs/filesystem")
+
+	set(BOOST_FILESYSTEM_SOURCES
+		"${BOOST_FILESYSTEM_DIR}/src/codecvt_error_category.cpp"
+		"${BOOST_FILESYSTEM_DIR}/src/directory.cpp"
+		"${BOOST_FILESYSTEM_DIR}/src/exception.cpp"
+		"${BOOST_FILESYSTEM_DIR}/src/operations.cpp"
+		"${BOOST_FILESYSTEM_DIR}/src/path.cpp"
+		"${BOOST_FILESYSTEM_DIR}/src/path_traits.cpp"
+		"${BOOST_FILESYSTEM_DIR}/src/portability.cpp"
+		"${BOOST_FILESYSTEM_DIR}/src/unique_path.cpp"
+		"${BOOST_FILESYSTEM_DIR}/src/utf8_codecvt_facet.cpp")
+
+	if(WIN32 OR CYGWIN)
+		list(APPEND BOOST_FILESYSTEM_SOURCES "${BOOST_FILESYSTEM_DIR}/src/windows_file_codecvt.cpp")
+	endif()
+
+	add_library(boost_filesystem STATIC ${BOOST_FILESYSTEM_SOURCES})
+	add_library(Boost::filesystem ALIAS boost_filesystem)
+
+	target_include_directories(boost_filesystem
+		PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/boost"
+		PRIVATE "${BOOST_FILESYSTEM_DIR}/src")
+
+	target_compile_definitions(boost_filesystem
+		PUBLIC BOOST_ALL_NO_LIB BOOST_FILESYSTEM_STATIC_LINK=1
+		PRIVATE BOOST_FILESYSTEM_SOURCE)
+
+	if(WIN32 OR CYGWIN)
+		# BCrypt is the source of randomness boost::filesystem::unique_path() uses
+		# on Windows, and it's available on every version Vita3K supports
+		target_compile_definitions(boost_filesystem PRIVATE
+			BOOST_USE_WINDOWS_H WIN32_LEAN_AND_MEAN BOOST_FILESYSTEM_HAS_BCRYPT)
+		target_link_libraries(boost_filesystem PRIVATE bcrypt)
+	endif()
+endif()
+
 option(BUILD_SHARED_LIBS "Build shared library" OFF)
 option(CAPSTONE_ARCHITECTURE_DEFAULT "Whether architectures are enabled by default" OFF)
 option(CAPSTONE_ARM_SUPPORT "ARM support" ON)

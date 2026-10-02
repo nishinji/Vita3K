@@ -107,69 +107,21 @@ endif()
 ########## Boost ###########
 ############################
 
-# Macro to build Boost buildsystem executable
-macro(b2_build)
-	if (CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
-		execute_process(
-			COMMAND ${BOOST_SOURCEDIR}/bootstrap.bat --with-toolset=${BOOST_TOOLSET}
-			WORKING_DIRECTORY ${BOOST_SOURCEDIR}
-			OUTPUT_QUIET
-		)
-	elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
-		execute_process(
-			COMMAND chmod +x ${BOOST_SOURCEDIR}/tools/build/src/engine/build.sh
-			COMMAND sh ${BOOST_SOURCEDIR}/bootstrap.sh
-			WORKING_DIRECTORY ${BOOST_SOURCEDIR}
-			OUTPUT_QUIET
-		)
-	elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
-		execute_process(
-			COMMAND chmod +x ${BOOST_SOURCEDIR}/tools/build/src/engine/build.sh
-			COMMAND sh ${BOOST_SOURCEDIR}/bootstrap.sh --with-toolset=${BOOST_TOOLSET}
-			WORKING_DIRECTORY ${BOOST_SOURCEDIR}
-			OUTPUT_QUIET
-		)
-	endif()
-endmacro(b2_build)
-
-# Macro to compile Boost
-macro(boost_compile)
-	list(TRANSFORM BOOST_MODULES_TO_FIND PREPEND --with- OUTPUT_VARIABLE b2_cmd_line_common)
-	set(b2_cmd_line_common ${b2} ${b2_cmd_line_common} -j${CPU_COUNT} --build-dir=${BOOST_INSTALLDIR} --stagedir=${BOOST_INSTALLDIR} cxxflags=${BOOST_CXX_FLAGS})
-	set(Boost_USE_DEBUG_RUNTIME "")
-	if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
-		execute_process(
-			COMMAND ${b2_cmd_line_common} address-model=64 --architecture=x64 toolset=${BOOST_TOOLSET} variant=debug,release stage
-			WORKING_DIRECTORY ${BOOST_SOURCEDIR}
-			OUTPUT_QUIET
-		)
-	elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-		execute_process(
-			COMMAND ${b2_cmd_line_common} architecture=${BOOST_ARCHITECTURE} cxxflags="-mmacosx-version-min=11.0" stage
-			WORKING_DIRECTORY ${BOOST_SOURCEDIR}
-			OUTPUT_QUIET
-		)
-	elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-		execute_process(
-			COMMAND ${b2_cmd_line_common} --ignore-site-config toolset=${BOOST_TOOLSET} stage
-			WORKING_DIRECTORY ${BOOST_SOURCEDIR}
-			OUTPUT_QUIET
-		)
-	endif()
-endmacro(boost_compile)
+# Boost modules that have to be linked against (i.e. the ones that aren't header only)
+set(BOOST_MODULES_TO_FIND filesystem)
 
 option(VITA3K_FORCE_CUSTOM_BOOST "Force Vita3K build process to use the Boost version included with the repository" OFF)
 option(VITA3K_FORCE_SYSTEM_BOOST "Force Vita3K build process to use the Boost version in the system and CMake's default paths and ignore the Boost version included with Vita3K" OFF)
 
-# Boost modules to be found by CMake
-set(BOOST_MODULES_TO_FIND filesystem)
-
-# If build process isn't set to forcefully use system Boost
+# Look for a Boost distribution, falling back to the one bundled with the repository
 macro(get_boost)
-	if(NOT VITA3K_FORCE_SYSTEM_BOOST)
-		# find_package(Boost ...) setting
-		set(Boost_USE_STATIC_LIBS ON)
+	# find_package(Boost ...) settings
+	set(Boost_USE_STATIC_LIBS ON)
 
+	if(VITA3K_FORCE_SYSTEM_BOOST)
+		# Only look for Boost on the system and CMake's default paths
+		find_package(Boost 1.81 COMPONENTS ${BOOST_MODULES_TO_FIND} REQUIRED)
+	else()
 		set(Boost_NO_WARN_NEW_VERSIONS 1)
 
 		# First, try to find Boost without any hints (system Boost)
@@ -177,92 +129,42 @@ macro(get_boost)
 			find_package(Boost 1.81 COMPONENTS ${BOOST_MODULES_TO_FIND} QUIET)
 		endif()
 
-		# If system Boost hasn't been found, then enable hints to find custom Boost
-		if (NOT Boost_FOUND)
+		# Otherwise, fall back to the distribution bundled in external/boost. It
+		# ships neither a CMake package nor a usable copy of the b2 buildsystem,
+		# so Boost.Filesystem is compiled as a regular CMake target (named
+		# boost_filesystem) by external/CMakeLists.txt instead.
+		if(NOT Boost_FOUND)
 			message(STATUS "A Boost distribution that meets the requirements needed for the project hasn't been found in your system. Falling back to custom Boost distribution...")
 
-			# Set path hints for Boost search inside the repository folder and assist in compilation if needed
-			set(BOOST_SOURCEDIR "${CMAKE_SOURCE_DIR}/external/boost")       # For internal use
-			set(BOOST_INSTALLDIR "${CMAKE_BINARY_DIR}/external/boost")      # For internal use
-			set(BOOST_ROOT "${BOOST_SOURCEDIR}")                            # find_package(Boost ...) hint
-			set(BOOST_INCLUDEDIR "${BOOST_SOURCEDIR}")                      # find_package(Boost ...) hint
-			set(BOOST_LIBRARYDIR "${BOOST_INSTALLDIR}/lib")                 # find_package(Boost ...) hint
+			set(BOOST_SOURCEDIR "${CMAKE_SOURCE_DIR}/external/boost")
 
-			# Find Boost again to check for a existing compilation of the custom distribution
-			find_package(Boost 1.81 COMPONENTS ${BOOST_MODULES_TO_FIND} PATHS ${BOOST_INSTALLDIR} NO_DEFAULT_PATH)
-
-			# If no build of the custom distribution is found, compile it
-			if(NOT Boost_FOUND)
-				message(STATUS "No existing custom distribution of Boost has been found in ${BOOST_INSTALLDIR}. Proceeding to compile Boost...")
-
-				# Set compilation toolset for b2 and Boost builds
-				if (CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
-					if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-						if(CMAKE_GENERATOR_TOOLSET STREQUAL "ClangCL")
-							# Proper toolset should be "clang-win", but b2 has a bug that makes it spam Visual Studio instances if set
-							# Since Clang for Windows is ABI-compatible with MSVC, using MSVC is fine
-							set(BOOST_TOOLSET "msvc")
-						else()
-							message(WARNING "Boost compilation on Windows requires the use of a clang-cl compiler running inside a Visual Studio Developer CLI environment with a Windows C++ SDK available.")
-							set(BOOST_TOOLSET "msvc")
-						endif()
-					else()
-						set(BOOST_TOOLSET "msvc")
-					endif()
-				elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
-					if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-						set(BOOST_TOOLSET "clang")
-					elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-						set(BOOST_TOOLSET "gcc")
-					endif()
-				elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
-					set(BOOST_TOOLSET "clang-darwin")
-					if (ARCHITECTURE STREQUAL "x86_64")
-						set(BOOST_ARCHITECTURE "x86")
-					elseif (ARCHITECTURE STREQUAL "arm64")
-						set(BOOST_ARCHITECTURE "arm")
-					else()
-						set(BOOST_ARCHITECTURE "arm+x86")
-					endif()
-				endif()
-
-				# Determine b2 executable name depending on host system
-				if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
-					set(b2_EXECUTABLE_NAME "b2.exe")
-				else()
-					set(b2_EXECUTABLE_NAME "b2")
-				endif()
-
-				# Find b2
-				find_program(b2 NAME ${b2_EXECUTABLE_NAME} PATHS ${BOOST_SOURCEDIR} NO_CACHE NO_DEFAULT_PATH)
-
-				# Compile b2 if it isn't found
-				if(b2 STREQUAL "b2-NOTFOUND")
-					message(STATUS "The b2 buildsystem executable hasn't been found in your system. Compiling b2...")
-					b2_build()
-
-					# Find b2 again after compilation
-					find_program(b2 NAME ${b2_EXECUTABLE_NAME} PATHS ${BOOST_SOURCEDIR} NO_CACHE NO_DEFAULT_PATH REQUIRED)
-				endif()
-
-				# Compile Boost
-				message(STATUS "Compiling Boost...")
-				boost_compile()
-
-				# Find Boost again
-				find_package(Boost 1.81 COMPONENTS ${BOOST_MODULES_TO_FIND} PATHS ${BOOST_INSTALLDIR} NO_DEFAULT_PATH REQUIRED)
-			else()
-				message(STATUS "Custom Boost distribution found in ${BOOST_INSTALLDIR}")
+			if(NOT EXISTS "${BOOST_SOURCEDIR}/boost/version.hpp")
+				message(FATAL_ERROR "Submodule external/boost is empty. "
+					"Please run: git submodule update --init --recursive")
 			endif()
+
+			set(VITA3K_USE_CUSTOM_BOOST ON)
+
+			# Let the external projects that look for Boost on their own pick up
+			# the bundled headers, as they only use the header only part of Boost
+			set(Boost_INCLUDE_DIR "${BOOST_SOURCEDIR}" CACHE PATH "Path to the Boost headers" FORCE)
+
+			set(Boost_INCLUDE_DIRS "${BOOST_SOURCEDIR}")
+			set(Boost_LIBRARIES boost_filesystem)
+			set(Boost_FOUND TRUE)
+
+			message(STATUS "Custom Boost distribution found in ${BOOST_SOURCEDIR}")
 		endif()
-	else()
-		# Try to find Boost on the system and CMake's default paths
-		set(Boost_USE_STATIC_LIBS ON)
-		find_package(Boost 1.81 COMPONENTS ${BOOST_MODULES_TO_FIND} REQUIRED)
 	endif()
 endmacro(get_boost)
 
 get_boost()
+
+# The bundled Boost distribution isn't built with b2, so its libraries don't
+# follow the naming scheme expected by the autolinking of MSVC like toolchains
+if(VITA3K_USE_CUSTOM_BOOST)
+	add_compile_definitions("BOOST_ALL_NO_LIB")
+endif()
 
 if(WIN32)
 	add_compile_definitions("_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS" "_CRT_SECURE_NO_WARNINGS" "NOMINMAX")
