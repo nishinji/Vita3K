@@ -34,9 +34,9 @@ struct ThreadState;
 struct ThreadParams;
 struct KernelState;
 
-typedef std::unique_ptr<CPUState, std::function<void(CPUState *)>> CPUStatePtr;
-typedef std::function<void(CPUState &, uint32_t, SceUID)> CallImport;
-typedef std::function<std::string(Address)> ResolveNIDName;
+using CPUStatePtr = std::unique_ptr<CPUState, std::function<void(CPUState *)>>;
+using CallImport = std::function<void(CPUState &, uint32_t, SceUID)>;
+using ResolveNIDName = std::function<std::string(Address)>;
 
 enum class ThreadStatus {
     run, // Running
@@ -138,4 +138,4 @@ private:
     MemState &mem;
 };
 
-typedef std::shared_ptr<ThreadState> ThreadStatePtr;
+using ThreadStatePtr = std::shared_ptr<ThreadState>;

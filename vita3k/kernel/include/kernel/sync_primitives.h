@@ -72,7 +72,7 @@ struct WaitingThreadData {
     }
 };
 
-typedef std::unique_ptr<ThreadDataQueue<WaitingThreadData>> WaitingThreadQueuePtr;
+using WaitingThreadQueuePtr = std::unique_ptr<ThreadDataQueue<WaitingThreadData>>;
 
 // NOTE: uid is copied to sync primitives here for debugging,
 //       not really needed since they are put in std::map's
@@ -93,8 +93,8 @@ struct SimpleEvent : SyncPrimitive {
     bool cb_wakeup_only;
 };
 
-typedef std::shared_ptr<SimpleEvent> SimpleEventPtr;
-typedef std::map<SceUID, SimpleEventPtr> SimpleEventPtrs;
+using SimpleEventPtr = std::shared_ptr<SimpleEvent>;
+using SimpleEventPtrs = std::map<SceUID, SimpleEventPtr>;
 
 struct Timer : SyncPrimitive {
     WaitingThreadQueuePtr waiting_threads;
@@ -109,8 +109,8 @@ struct Timer : SyncPrimitive {
     uint64_t event_interval = 0;
 };
 
-typedef std::shared_ptr<Timer> TimerPtr;
-typedef std::map<SceUID, TimerPtr> TimerPtrs;
+using TimerPtr = std::shared_ptr<Timer>;
+using TimerPtrs = std::map<SceUID, TimerPtr>;
 
 struct Semaphore : SyncPrimitive {
     WaitingThreadQueuePtr waiting_threads;
@@ -119,8 +119,8 @@ struct Semaphore : SyncPrimitive {
     int init_val;
 };
 
-typedef std::shared_ptr<Semaphore> SemaphorePtr;
-typedef std::map<SceUID, SemaphorePtr> SemaphorePtrs;
+using SemaphorePtr = std::shared_ptr<Semaphore>;
+using SemaphorePtrs = std::map<SceUID, SemaphorePtr>;
 
 struct Mutex : SyncPrimitive {
     int init_count;
@@ -130,8 +130,8 @@ struct Mutex : SyncPrimitive {
     Ptr<SceKernelLwMutexWork> workarea;
 };
 
-typedef std::shared_ptr<Mutex> MutexPtr;
-typedef std::map<SceUID, MutexPtr> MutexPtrs;
+using MutexPtr = std::shared_ptr<Mutex>;
+using MutexPtrs = std::map<SceUID, MutexPtr>;
 
 enum class RWLockState {
     Unlocked,
@@ -140,7 +140,7 @@ enum class RWLockState {
 };
 
 // the int value is the lock count for recursive locks
-typedef std::map<ThreadStatePtr, int> RWLockOwners;
+using RWLockOwners = std::map<ThreadStatePtr, int>;
 
 struct RWLock : SyncPrimitive {
     RWLockState state;
@@ -148,16 +148,16 @@ struct RWLock : SyncPrimitive {
     WaitingThreadQueuePtr waiting_threads;
 };
 
-typedef std::shared_ptr<RWLock> RWLockPtr;
-typedef std::map<SceUID, RWLockPtr> RWLockPtrs;
+using RWLockPtr = std::shared_ptr<RWLock>;
+using RWLockPtrs = std::map<SceUID, RWLockPtr>;
 
 struct EventFlag : SyncPrimitive {
     WaitingThreadQueuePtr waiting_threads;
     int flags;
 };
 
-typedef std::shared_ptr<EventFlag> EventFlagPtr;
-typedef std::map<SceUID, EventFlagPtr> EventFlagPtrs;
+using EventFlagPtr = std::shared_ptr<EventFlag>;
+using EventFlagPtrs = std::map<SceUID, EventFlagPtr>;
 
 struct Condvar : SyncPrimitive {
     struct SignalTarget {
@@ -180,8 +180,8 @@ struct Condvar : SyncPrimitive {
     WaitingThreadQueuePtr waiting_threads;
     MutexPtr associated_mutex;
 };
-typedef std::shared_ptr<Condvar> CondvarPtr;
-typedef std::map<SceUID, CondvarPtr> CondvarPtrs;
+using CondvarPtr = std::shared_ptr<Condvar>;
+using CondvarPtrs = std::map<SceUID, CondvarPtr>;
 
 struct MsgPipe : SyncPrimitive {
     MsgPipe(std::size_t bufSize)
@@ -197,8 +197,8 @@ struct MsgPipe : SyncPrimitive {
     ~MsgPipe() override = default;
 };
 
-typedef std::shared_ptr<MsgPipe> MsgPipePtr;
-typedef std::map<SceUID, MsgPipePtr> MsgPipePtrs;
+using MsgPipePtr = std::shared_ptr<MsgPipe>;
+using MsgPipePtrs = std::map<SceUID, MsgPipePtr>;
 
 enum class SyncWeight {
     Light, // lightweight

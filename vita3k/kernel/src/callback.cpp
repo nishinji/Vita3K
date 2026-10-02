@@ -90,7 +90,7 @@ void Callback::execute(KernelState &kernel, const std::function<void()> &deleter
     if (!this->is_notified())
         return;
 
-    std::vector<uint32_t> args = { (uint32_t)(this->notifier_id), this->num_notifications, (uint32_t)this->notification_arg, this->userdata.address() };
+    std::vector<uint32_t> args = { static_cast<uint32_t>(this->notifier_id), this->num_notifications, static_cast<uint32_t>(this->notification_arg), this->userdata.address() };
     int ret = kernel.get_thread(this->thread_id)->run_callback(this->cb_func.address(), args);
     if (ret != 0) {
         deleter();
