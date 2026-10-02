@@ -173,6 +173,10 @@ void draw(GLState &renderer, GLContext &context, const FeatureState &features, S
             frag_ublock.back_disabled = (context.record.back_side_fragment_program_mode == SCE_GXM_FRAGMENT_PROGRAM_DISABLED) ? 1.0f : 0.0f;
     }
 
+    // nothing can observe the color of this scene, see cmd_handle_draw
+    if (context.record.skip_color_output)
+        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+
     if (context.record.is_maskupdate) {
         context.render_target->mask_clear_value = -1;
         // Tests bypassed in maskupdate
@@ -261,7 +265,7 @@ void draw(GLState &renderer, GLContext &context, const FeatureState &features, S
         glBindFramebuffer(GL_FRAMEBUFFER, context.current_framebuffer);
     }
 
-    if (both_side_fragment_program_disabled) {
+    if (both_side_fragment_program_disabled || context.record.skip_color_output) {
         sync_blending(context.record, mem);
     }
 
