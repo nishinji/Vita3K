@@ -843,7 +843,7 @@ EXPORT(int, _sceKernelWaitSignalCB, uint32_t unknown, uint32_t delay, uint32_t t
     return CALL_EXPORT(_sceKernelWaitSignal, unknown, delay, timeout);
 }
 
-static int wait_thread_end(KernelState &kernel, ThreadStatePtr &waiter, ThreadStatePtr &target, int *stat) {
+static int wait_thread_end(KernelState &kernel, ThreadStatePtr &waiter, ThreadStatePtr &target, int *stat, SceUInt *timeout, const char *export_name) {
     std::unique_lock<std::mutex> waiter_lock(waiter->mutex);
     {
         const std::unique_lock<std::mutex> thread_lock(target->mutex);
@@ -854,13 +854,32 @@ static int wait_thread_end(KernelState &kernel, ThreadStatePtr &waiter, ThreadSt
             return 0;
         }
 
+        if (timeout && *timeout == 0)
+            return RET_ERROR(SCE_KERNEL_ERROR_WAIT_TIMEOUT);
+
         waiter->update_status(ThreadStatus::wait);
         target->waiting_threads.push_back(waiter);
     }
-    waiter->status_cond.wait(waiter_lock, [&]() {
-        return waiter->status == ThreadStatus::run;
-    });
-    return 0;
+    const auto woken = [&]() { return waiter->status == ThreadStatus::run; };
+    if (!timeout) {
+        waiter->status_cond.wait(waiter_lock, woken);
+        return 0;
+    }
+
+    if (waiter->status_cond.wait_for(waiter_lock, std::chrono::microseconds{ *timeout }, woken))
+        return 0;
+
+    // The exiting thread locks target then waiter, so relock in that order
+    waiter_lock.unlock();
+    const std::lock_guard<std::mutex> thread_lock(target->mutex);
+    waiter_lock.lock();
+    if (woken())
+        return 0;
+
+    std::erase(target->waiting_threads, waiter);
+    waiter->update_status(ThreadStatus::run, ThreadStatus::wait);
+    *timeout = 0;
+    return RET_ERROR(SCE_KERNEL_ERROR_WAIT_TIMEOUT);
 }
 
 EXPORT(int, _sceKernelWaitThreadEnd, SceUID thid, int *stat, SceUInt *timeout) {
@@ -870,7 +889,7 @@ EXPORT(int, _sceKernelWaitThreadEnd, SceUID thid, int *stat, SceUInt *timeout) {
     if (!target) {
         return RET_ERROR(SCE_KERNEL_ERROR_UNKNOWN_THREAD_ID);
     }
-    return wait_thread_end(emuenv.kernel, waiter, target, stat);
+    return wait_thread_end(emuenv.kernel, waiter, target, stat, timeout, export_name);
 }
 
 EXPORT(int, _sceKernelWaitThreadEndCB, SceUID thid, int *stat, SceUInt *timeout) {
@@ -881,7 +900,7 @@ EXPORT(int, _sceKernelWaitThreadEndCB, SceUID thid, int *stat, SceUInt *timeout)
         return RET_ERROR(SCE_KERNEL_ERROR_UNKNOWN_THREAD_ID);
     }
     process_callbacks(emuenv.kernel, thread_id);
-    return wait_thread_end(emuenv.kernel, waiter, target, stat);
+    return wait_thread_end(emuenv.kernel, waiter, target, stat, timeout, export_name);
 }
 
 EXPORT(SceInt32, sceKernelCancelCallback, SceUID callbackId) {
