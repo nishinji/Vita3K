@@ -22,6 +22,7 @@
 #include <kernel/types.h>
 #include <util/align.h>
 #include <util/log.h>
+#include <util/precise_sleep.h>
 
 #include <algorithm>
 
@@ -335,16 +336,21 @@ SceInt32 Timer::wait(const ThreadStatePtr &thread, SceUInt32 *result_pattern, Sc
         }
         // only the first waiter waits for the event, the others wait until they are first
         const bool is_first = waiters.front() == &waiter;
-        Deadline deadline = guest_deadline;
+        Deadline wait_deadline = guest_deadline;
+        Deadline event_deadline = Deadline::max();
         if (is_first && next_event != std::numeric_limits<uint64_t>::max()) {
             const uint64_t wait_time = next_event > current_time ? next_event - current_time : 0;
-            deadline = std::min(deadline, std::chrono::steady_clock::now() + std::chrono::microseconds(wait_time));
+            event_deadline = std::chrono::steady_clock::now() + std::chrono::microseconds(wait_time);
+            // a timed wait can end about the host timer resolution late, so wait until the event is this close, then sleep precisely
+            wait_deadline = std::min(guest_deadline, event_deadline - std::chrono::milliseconds(2));
         }
 
         guard.unlock();
-        WaitResult r = thread->wait({ SCE_KERNEL_WAITTYPE_EVENT, uid, callbacks }, deadline);
+        WaitResult r = thread->wait({ SCE_KERNEL_WAITTYPE_EVENT, uid, callbacks }, wait_deadline);
         if (r && *r == SCE_KERNEL_ERROR_NOTIFY_CALLBACK)
             r = thread->run_callbacks();
+        if (r && event_deadline <= guest_deadline && std::chrono::steady_clock::now() >= wait_deadline)
+            util::sleep_until_precise(event_deadline, true);
         guard.lock();
         // A waker that ended the wait meanwhile, like an event that reached every waiter at once,
         // wins over the deadline and the thread's end
