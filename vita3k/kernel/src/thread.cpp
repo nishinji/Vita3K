@@ -570,11 +570,12 @@ WaitResult ThreadState::wait(WaitTarget target, Deadline deadline) {
     else if (target.type == SCE_KERNEL_WAITTYPE_DELAY) {
         // condition variable timeouts can overshoot by 2 ms (Windows), which breaks games pacing frames with delays
         constexpr auto coarse_margin = std::chrono::milliseconds(2);
-        const bool long_delay = deadline - Deadline::clock::now() >= std::chrono::milliseconds(4);
+        const bool long_delay = deadline - Deadline::clock::now() >= std::chrono::milliseconds(8);
         satisfied = wait_cv.wait_until(lock, deadline - coarse_margin, woken);
         if (!satisfied) {
             lock.unlock();
-            // only frame pacing needs that accuracy; spinning through polling delays would waste a host core
+            // only frame pacing needs that accuracy; spinning through polling delays (1 ms in Persona 4 Golden,
+        // 4 ms in Project DIVA F 2nd) would waste a host core
             util::sleep_until_precise(deadline, long_delay);
             lock.lock();
             satisfied = woken();
