@@ -311,6 +311,8 @@ struct VKContext : public renderer::Context {
 
     vk::Framebuffer current_framebuffer;
     vk::Framebuffer current_shader_interlock_framebuffer = nullptr;
+    // framebuffer compatible with the render passes that can read the color attachment
+    vk::Framebuffer current_color_input_framebuffer = nullptr;
     // we need the format or image for some cases
     vkutil::Image *current_color_base_image;
     vk::Format current_color_format;
@@ -320,6 +322,10 @@ struct VKContext : public renderer::Context {
     bool is_recording = false;
     bool in_renderpass = false;
     bool in_maskupdate_pass = false;
+    // whether a render pass was started since the beginning of the scene
+    bool scene_render_pass_started = false;
+    // whether the scene loads the depth-stencil content from memory
+    bool scene_force_load = false;
     bool refresh_pipeline = false;
     bool is_first_scene_draw = false;
     vk::ImageAspectFlags initial_depth_stencil_clear;
@@ -359,6 +365,8 @@ struct VKContext : public renderer::Context {
     void begin_visibility_query();
     void end_visibility_query();
     void resolve_visibility_queries();
+    // continue the scene in render passes that can read the color attachment (as an input attachment or a texture)
+    void switch_to_color_input_pass();
     void stop_recording(const SceGxmNotification &notif1, const SceGxmNotification &notif2, bool submit = true);
 
     // check (when the render target has macroblock set) if we are drawing to another block

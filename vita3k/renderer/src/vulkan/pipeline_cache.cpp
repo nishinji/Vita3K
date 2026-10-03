@@ -403,11 +403,12 @@ void PipelineCache::cleanup() {
 
     for (int i = 0; i < 2; i++)
         for (int j = 0; j < 2; j++)
-            for (int k = 0; k < 2; k++) {
-                for (auto &[fmt, pass] : render_passes[i][j][k])
-                    state.device.destroy(pass);
-                render_passes[i][j][k].clear();
-            }
+            for (int k = 0; k < 2; k++)
+                for (int l = 0; l < 2; l++) {
+                    for (auto &[fmt, pass] : render_passes[i][j][k][l])
+                        state.device.destroy(pass);
+                    render_passes[i][j][k][l].clear();
+                }
 
     for (auto &[fmt, pass] : shader_interlock_pass)
         state.device.destroy(pass);
@@ -591,8 +592,12 @@ vk::RenderPass PipelineCache::retrieve_mask_render_pass() {
     return mask_render_pass;
 }
 
-vk::RenderPass PipelineCache::retrieve_render_pass(vk::Format format, bool force_load, bool force_store, bool is_color_transient, bool no_color) {
-    auto &render_passes_map = no_color ? shader_interlock_pass : render_passes[is_color_transient][force_load][force_store];
+vk::RenderPass PipelineCache::retrieve_render_pass(vk::Format format, bool force_load, bool force_store, bool is_color_transient, bool no_color, bool color_input) {
+    // reading the color attachment as an input attachment requires the GENERAL layout, in which the GPU may not keep
+    // it compressed, so with subpass inputs the color surfaces are only readable in the render passes that need it
+    // (the render target's own color attachment is never sampled, so it is always readable)
+    color_input |= is_color_transient || !state.features.direct_fragcolor;
+    auto &render_passes_map = no_color ? shader_interlock_pass : render_passes[is_color_transient][force_load][force_store][color_input];
 
     auto it = render_passes_map.find(format);
 
@@ -601,9 +606,10 @@ vk::RenderPass PipelineCache::retrieve_render_pass(vk::Format format, bool force
 
     // create a new render pass for this format
 
+    const vk::ImageLayout color_layout = color_input ? vk::ImageLayout::eGeneral : vk::ImageLayout::eColorAttachmentOptimal;
     vk::AttachmentReference color_ref{
         .attachment = 0,
-        .layout = vk::ImageLayout::eGeneral
+        .layout = color_layout
     };
     vk::AttachmentReference ds_ref{
         .attachment = no_color ? 0U : 1U,
@@ -615,11 +621,13 @@ vk::RenderPass PipelineCache::retrieve_render_pass(vk::Format format, bool force
 
     subpass.setPDepthStencilAttachment(&ds_ref);
     if (!no_color) {
-        if (support_coherent_framebuffer_fetch)
-            subpass.flags = vk::SubpassDescriptionFlagBits::eRasterizationOrderAttachmentColorAccessEXT;
-
         subpass.setColorAttachments(color_ref);
-        subpass.setInputAttachments(color_ref);
+        if (color_input) {
+            if (support_coherent_framebuffer_fetch)
+                subpass.flags = vk::SubpassDescriptionFlagBits::eRasterizationOrderAttachmentColorAccessEXT;
+
+            subpass.setInputAttachments(color_ref);
+        }
     }
 
     vk::AttachmentDescription color_attachment{
@@ -627,8 +635,8 @@ vk::RenderPass PipelineCache::retrieve_render_pass(vk::Format format, bool force
         .samples = vk::SampleCountFlagBits::e1,
         .loadOp = is_color_transient ? vk::AttachmentLoadOp::eDontCare : vk::AttachmentLoadOp::eLoad,
         .storeOp = is_color_transient ? vk::AttachmentStoreOp::eDontCare : vk::AttachmentStoreOp::eStore,
-        .initialLayout = is_color_transient ? vk::ImageLayout::eUndefined : vk::ImageLayout::eGeneral,
-        .finalLayout = vk::ImageLayout::eGeneral
+        .initialLayout = is_color_transient ? vk::ImageLayout::eUndefined : color_layout,
+        .finalLayout = color_layout
     };
 
     vk::AttachmentLoadOp load_op = force_load ? vk::AttachmentLoadOp::eLoad : vk::AttachmentLoadOp::eClear;

@@ -211,17 +211,33 @@ void set_context(VKContext &context, MemState &mem, VKRenderTarget *rt, const Fe
     if (context.state.features.support_shader_interlock || features.use_mask_bit)
         // Preserve depth/stencil when a mask update splits the scene.
         force_store = true;
-    context.current_render_pass = context.state.pipeline_cache.retrieve_render_pass(vk_format, force_load, force_store, color_surface_fin == nullptr);
-    context.initial_render_pass = context.current_render_pass;
-    context.initial_depth_stencil_clear = force_load ? vk::ImageAspectFlags() : vk::ImageAspectFlagBits::eDepth | vk::ImageAspectFlagBits::eStencil;
+    const bool is_color_transient = (color_surface_fin == nullptr);
+
+    // the render passes given here are only used to create compatible framebuffers
+    vk::RenderPass color_input_pass = nullptr;
+    if (context.state.features.direct_fragcolor)
+        color_input_pass = context.state.pipeline_cache.retrieve_render_pass(vk_format, true, true, false, false, true);
     if (context.state.features.support_shader_interlock)
         // also retrieve / create the shader interlock pass
-        context.current_shader_interlock_pass = context.state.pipeline_cache.retrieve_render_pass(vk_format, true, true, color_surface_fin == nullptr, true);
-
-    Framebuffer &framebuffer = state.surface_cache.retrieve_framebuffer_handle(mem, color_surface_fin, ds_surface_fin, context.current_render_pass, context.current_shader_interlock_pass, context.current_color_view, context.current_ds_view);
-    context.current_framebuffer = framebuffer.standard;
+        context.current_shader_interlock_pass = context.state.pipeline_cache.retrieve_render_pass(vk_format, true, true, is_color_transient, true);
+    Framebuffer &framebuffer = state.surface_cache.retrieve_framebuffer_handle(mem, color_surface_fin, ds_surface_fin,
+        context.state.pipeline_cache.retrieve_render_pass(vk_format, true, true, is_color_transient, false, false), context.current_shader_interlock_pass, color_input_pass, context.current_color_view, context.current_ds_view);
     context.current_shader_interlock_framebuffer = framebuffer.shader_interlock;
+    context.current_color_input_framebuffer = framebuffer.color_input;
     context.current_color_base_image = framebuffer.base_image;
+
+    // a scene rendering to a color surface starts in a render pass that cannot read it, see switch_to_color_input_pass,
+    // unless the surface is known to be read while it is rendered to
+    context.record.color_input_pass = is_color_transient || state.surface_cache.is_rendered_surface_read_while_rendered();
+    if (context.state.features.direct_fragcolor && !context.record.color_input_pass)
+        // the scene may continue in another render pass
+        force_store = true;
+    context.scene_force_load = force_load;
+    context.scene_render_pass_started = false;
+    context.current_render_pass = context.state.pipeline_cache.retrieve_render_pass(vk_format, force_load, force_store, is_color_transient, false, context.record.color_input_pass);
+    context.initial_render_pass = context.current_render_pass;
+    context.initial_depth_stencil_clear = force_load ? vk::ImageAspectFlags() : vk::ImageAspectFlagBits::eDepth | vk::ImageAspectFlagBits::eStencil;
+    context.current_framebuffer = (context.record.color_input_pass && !is_color_transient) ? framebuffer.color_input : framebuffer.standard;
 
     // make sure we are not keeping any texture from the previous pass
     // (textures can be still bound even though they are not used)
@@ -371,7 +387,7 @@ void VKContext::start_render_pass(bool create_descriptor_set, bool maskupdate) {
         const uint16_t macroblock_bit = 1U << (last_macroblock_x + 4 * last_macroblock_y);
         is_first_scene_draw = (initialized_macroblocks & macroblock_bit) == 0;
         const bool first_macroblock = initialized_macroblocks == 0;
-        current_render_pass = first_macroblock ? initial_render_pass : state.pipeline_cache.retrieve_render_pass(current_color_format, true, true, !record.color_surface.data);
+        current_render_pass = first_macroblock ? initial_render_pass : state.pipeline_cache.retrieve_render_pass(current_color_format, true, true, !record.color_surface.data, false, record.color_input_pass);
         if (is_first_scene_draw && !first_macroblock)
             macroblock_clear = initial_depth_stencil_clear;
         initialized_macroblocks |= macroblock_bit;
@@ -411,6 +427,7 @@ void VKContext::start_render_pass(bool create_descriptor_set, bool maskupdate) {
         const vk::ClearRect rect{ .rect = curr_renderpass_info.renderArea, .layerCount = 1 };
         render_cmd.clearAttachments(clear, rect);
     }
+    scene_render_pass_started = true;
 
     // set the renderpass info ready in case we need to switch between classic and framebuffer fetch usage
     curr_renderpass_info.setClearValues(nullptr);
@@ -611,6 +628,23 @@ void VKContext::resolve_visibility_queries() {
     visibility_queries.clear();
 }
 
+void VKContext::switch_to_color_input_pass() {
+    const bool restart_render_pass = in_renderpass;
+    if (restart_render_pass)
+        stop_render_pass();
+
+    current_color_base_image->transition_to(render_cmd, vkutil::ImageLayout::ColorAttachmentReadWrite);
+    record.color_input_pass = true;
+    // the transition can be expensive, render the next scenes to this surface in such a render pass from the start
+    state.surface_cache.set_rendered_surface_read_while_rendered();
+    // keep what the scene has rendered so far
+    current_render_pass = state.pipeline_cache.retrieve_render_pass(current_color_format, scene_force_load || scene_render_pass_started, true, false, false, true);
+    current_framebuffer = current_color_input_framebuffer;
+
+    if (restart_render_pass)
+        start_render_pass();
+}
+
 void VKContext::stop_recording(const SceGxmNotification &notif1, const SceGxmNotification &notif2, bool submit) {
     if (!is_recording) {
         LOG_ERROR("Stopping recording while not recording");
@@ -695,7 +729,7 @@ void VKContext::check_for_macroblock_change(bool is_draw) {
         // TODO: with the feedback loop extension we can do better
         ignore_macroblock = true;
         // in this case we must load and store the depth stencil each time
-        current_render_pass = state.pipeline_cache.retrieve_render_pass(current_color_format, true, true, !record.color_surface.data);
+        current_render_pass = state.pipeline_cache.retrieve_render_pass(current_color_format, true, true, !record.color_surface.data, false, record.color_input_pass);
     }
 
     // use the scissor to know in which macroblock we are

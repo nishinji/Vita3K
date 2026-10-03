@@ -124,8 +124,10 @@ struct GxmRecordState {
     bool is_gamma_corrected = false;
     // the scene has no color surface and nothing can observe the fragment color, see cmd_handle_draw
     bool skip_color_output = false;
+    // vulkan: the render pass lets the fragment shader read the color attachment, see VKContext::switch_to_color_input_pass
+    bool color_input_pass = false;
 
-    uint8_t _padding[5] = {};
+    uint8_t _padding[4] = {};
 
     // Do not put any state not used for the Vulkan pipeline creation before vertex_streams
     std::array<GXMStreamInfo, SCE_GXM_MAX_VERTEX_STREAMS> vertex_streams;
