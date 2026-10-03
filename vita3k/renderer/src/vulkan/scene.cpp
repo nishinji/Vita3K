@@ -509,11 +509,15 @@ void draw(VKContext &context, SceGxmPrimitiveType type, SceGxmIndexFormat format
     // we need to always load the depth-stencil after the first draw
     if (!maskupdate && context.is_first_scene_draw && (context.state.features.support_shader_interlock || context.state.features.use_mask_bit || context.ignore_macroblock)) {
         // update the render pass to load and store the depth and stencil
-        context.current_render_pass = context.state.pipeline_cache.retrieve_render_pass(context.current_color_format, true, true, !context.record.color_surface.data);
+        context.current_render_pass = context.state.pipeline_cache.retrieve_render_pass(context.current_color_format, true, true, !context.record.color_surface.data, false, context.record.color_input_pass);
         context.is_first_scene_draw = false;
     }
 
     const bool uses_interlock = uses_framebuffer_fetch && context.state.features.support_shader_interlock && !masked_fetch;
+    if (context.state.features.direct_fragcolor && !maskupdate && fragment_program_gxp.is_frag_color_used() && !context.record.color_input_pass)
+        // the shader reads the color attachment, which the current render pass does not allow
+        context.switch_to_color_input_pass();
+
     if (!maskupdate && context.state.features.support_shader_interlock
         && uses_interlock != context.last_draw_was_framebuffer_fetch) {
         // restart the render pass to act as a barrier
