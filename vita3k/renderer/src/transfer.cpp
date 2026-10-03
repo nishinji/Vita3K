@@ -56,8 +56,15 @@ static void perform_transfer_copy_impl(MemState &mem, const SceGxmTransferImage 
         }
     };
 
-    for (uint32_t dx = 0; dx < src.width; dx++) {
-        for (uint32_t dy = 0; dy < src.height; dy++) {
+    if constexpr (mode == SCE_GXM_TRANSFER_COLORKEY_NONE && src_type == SCE_GXM_TRANSFER_LINEAR && dst_type == SCE_GXM_TRANSFER_LINEAR) {
+        for (uint32_t dy = 0; dy < src.height; dy++)
+            memcpy(&dst_ptr[compute_offset(dst.x, dst.y + dy, dst, dst_type)], &src_ptr[compute_offset(src.x, src.y + dy, src, src_type)], src.width * sizeof(T));
+        return;
+    }
+
+    // go through the rows in order, linear images are laid out this way
+    for (uint32_t dy = 0; dy < src.height; dy++) {
+        for (uint32_t dx = 0; dx < src.width; dx++) {
             // compute offset depending on the texture type used
             // the function compute_offset gets inlined
             uint32_t src_offset = compute_offset(src.x + dx, src.y + dy, src, src_type);
