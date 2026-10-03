@@ -406,12 +406,16 @@ void draw(VKContext &context, SceGxmPrimitiveType type, SceGxmIndexFormat format
     // we need to always load the depth-stencil after the first draw
     if (context.is_first_scene_draw && (context.state.features.support_shader_interlock || context.ignore_macroblock)) {
         // update the render pass to load and store the depth and stencil
-        context.current_render_pass = context.state.pipeline_cache.retrieve_render_pass(context.current_color_format, true, true, !context.record.color_surface.data);
+        context.current_render_pass = context.state.pipeline_cache.retrieve_render_pass(context.current_color_format, true, true, !context.record.color_surface.data, false, context.record.color_input_pass);
         context.is_first_scene_draw = false;
     }
 
     const SceGxmFragmentProgram &gxm_fragment_program = *context.record.fragment_program.get(mem);
     const SceGxmProgram &fragment_program_gxp = *gxm_fragment_program.program.get(mem);
+    if (context.state.features.direct_fragcolor && fragment_program_gxp.is_frag_color_used() && !context.record.color_input_pass)
+        // the shader reads the color attachment, which the current render pass does not allow
+        context.switch_to_color_input_pass();
+
     if (context.state.features.direct_fragcolor && fragment_program_gxp.is_frag_color_used() && !context.record.skip_color_output) {
         // the fragment shader is using programmable blending with a subpass input
         // (skipped when nothing can observe the color, the previous draws did not write any)

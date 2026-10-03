@@ -58,6 +58,8 @@ struct Framebuffer {
     vk::Framebuffer standard;
     // framebuffer used with shader interlock
     vk::Framebuffer shader_interlock;
+    // framebuffer used with the render passes that can read the color attachment
+    vk::Framebuffer color_input;
     // base color image used by the framebuffer
     vkutil::Image *base_image;
 };
@@ -81,6 +83,9 @@ struct ColorSurfaceCacheInfo : public SurfaceCacheInfo {
     uint16_t original_height;
     uint32_t stride_bytes;
     uint64_t last_frame_rendered;
+    // the surface is read by the scenes rendering to it (programmable blending or sampling),
+    // so it is always rendered in a render pass that can read it
+    bool read_while_rendered = false;
 
     SceGxmColorBaseFormat format;
     vk::ComponentMapping swizzle;
@@ -182,6 +187,8 @@ private:
 
     VKRenderTarget *target = nullptr;
     ColorSurfaceCacheInfo *last_written_surface = nullptr;
+    // color surface the current scene renders to
+    ColorSurfaceCacheInfo *rendered_surface = nullptr;
 
     // destroy all framebuffers using view as their color or depth-stencil
     void destroy_framebuffers(vk::ImageView view);
@@ -190,6 +197,15 @@ private:
     void destroy_surface(DepthStencilSurfaceCacheInfo &info);
 
 public:
+    // whether the color surface of the current scene is read while it is rendered to
+    bool is_rendered_surface_read_while_rendered() const {
+        return rendered_surface && rendered_surface->read_while_rendered;
+    }
+    void set_rendered_surface_read_while_rendered() {
+        if (rendered_surface)
+            rendered_surface->read_while_rendered = true;
+    }
+
     // when creating a mutable image, can we pass as an argument
     // the possible format used for an image view to improve performance ?
     bool support_image_format_specifier = false;
@@ -209,7 +225,7 @@ public:
     std::optional<TextureLookupResult> retrieve_depth_stencil_as_texture(const SceGxmTexture &texture, TextureViewport *texture_viewport);
 
     Framebuffer &retrieve_framebuffer_handle(MemState &mem, SceGxmColorSurface *color, SceGxmDepthStencilSurface *depth_stencil,
-        vk::RenderPass standard_render_pass, vk::RenderPass interlock_render_pass, vk::ImageView &color_view, vk::ImageView &ds_view);
+        vk::RenderPass standard_render_pass, vk::RenderPass interlock_render_pass, vk::RenderPass color_input_render_pass, vk::ImageView &color_view, vk::ImageView &ds_view);
 
     // Check if the address is one of a used surface
     // If it is the case, this function returns true, moves the callback
@@ -230,7 +246,8 @@ public:
 
     // Return the image along with the viewport to be displayed on the screen
     // Viewport should already have its fields width and height filled
-    vk::ImageView sourcing_color_surface_for_presentation(Ptr<const void> address, uint32_t pitch, Viewport &viewport);
+    // cmd_buffer: used to make the surface readable, layout: set to the layout the surface is read in
+    vk::ImageView sourcing_color_surface_for_presentation(Ptr<const void> address, uint32_t pitch, Viewport &viewport, vk::CommandBuffer cmd_buffer, vk::ImageLayout &layout);
 
     // Dump an rgba8 frame with the given properties to the returned vector
     // if this function fails, the vector will be empty

@@ -59,6 +59,27 @@ static bool format_need_additional_memory(SceGxmColorBaseFormat format) {
 
 namespace renderer::vulkan {
 
+// layout a color surface is rendered in: with subpass inputs, the color attachment is only readable in the render
+// passes that need it, so most surfaces can be kept in the layout the GPU may compress (GENERAL may not be)
+static vkutil::ImageLayout surface_layout(const VKState &state, const ColorSurfaceCacheInfo &info) {
+    return (state.features.direct_fragcolor && !info.read_while_rendered) ? vkutil::ImageLayout::ColorAttachment : vkutil::ImageLayout::ColorAttachmentReadWrite;
+}
+
+// transfer commands can read a color surface in GENERAL or TRANSFER_SRC_OPTIMAL only
+static vk::ImageLayout begin_surface_read_transfer(vk::CommandBuffer cmd_buffer, vkutil::Image &image, vkutil::ImageLayout &previous_layout) {
+    previous_layout = image.layout;
+    if (vkutil::get_underlying_layout(image.layout) == vk::ImageLayout::eGeneral)
+        return vk::ImageLayout::eGeneral;
+
+    image.transition_to(cmd_buffer, vkutil::ImageLayout::TransferSrc);
+    return vk::ImageLayout::eTransferSrcOptimal;
+}
+
+static void end_surface_read_transfer(vk::CommandBuffer cmd_buffer, vkutil::Image &image, vkutil::ImageLayout previous_layout) {
+    if (image.layout != previous_layout)
+        image.transition_to(cmd_buffer, previous_layout);
+}
+
 static void protect_surface(MemState &mem, ColorSurfaceCacheInfo &info) {
     const bool trap_reads = (info.tiling == SurfaceTiling::Linear
         && format_support_surface_sync(info.format));
@@ -100,6 +121,7 @@ void VKSurfaceCache::destroy_framebuffers(vk::ImageView view) {
         if (it->first.first == view || it->first.second == view) {
             destroy_queue.add(it->second.standard);
             destroy_queue.add(it->second.shader_interlock);
+            destroy_queue.add(it->second.color_input);
             it = framebuffer_array.erase(it);
         } else {
             it = std::next(it);
@@ -149,6 +171,7 @@ void VKSurfaceCache::cleanup() {
     for (auto &[key, fb] : framebuffer_array) {
         state.device.destroy(fb.standard);
         state.device.destroy(fb.shader_interlock);
+        state.device.destroy(fb.color_input);
     }
     framebuffer_array.clear();
 
@@ -280,11 +303,16 @@ SurfaceRetrieveResult VKSurfaceCache::retrieve_color_surface_for_framebuffer(Mem
             *info.dirty = false;
 
             last_written_surface = &info;
+            rendered_surface = &info;
 
             // if this surface has not been rendered to for the last 60 frames, consider it is not safe not to render all shaders to it
             constexpr uint64_t big_delay_between_frames = 60;
             state.pipeline_cache.can_use_deferred_compilation = context->frame_timestamp - info.last_frame_rendered < big_delay_between_frames;
             info.last_frame_rendered = context->frame_timestamp;
+
+            // the surface may have been made readable since it was last rendered to
+            if (info.texture.layout != surface_layout(state, info))
+                info.texture.transition_to(context->prerender_cmd, surface_layout(state, info));
 
             if (vk_format == info.texture.format) {
                 return { info.texture.view, &info.texture };
@@ -328,6 +356,7 @@ SurfaceRetrieveResult VKSurfaceCache::retrieve_color_surface_for_framebuffer(Mem
     info_added.total_bytes = total_surface_size;
     info_added.format = base_format;
     info_added.tiling = tiling;
+    info_added.read_while_rendered = false;
     // only remember the swizzle here, it will be useful if we get to present or sample from this image with a different swizzle
     info_added.swizzle = color::translate_swizzle(color->colorFormat);
 
@@ -362,9 +391,10 @@ SurfaceRetrieveResult VKSurfaceCache::retrieve_color_surface_for_framebuffer(Mem
 
     vk::ClearColorValue clear_color{ std::array<float, 4>({ 0.0f, 0.0f, 0.0f, 0.0f }) };
     cmd_buffer.clearColorImage(image.image, vk::ImageLayout::eTransferDstOptimal, clear_color, vkutil::color_subresource_range);
-    image.transition_to(cmd_buffer, vkutil::ImageLayout::ColorAttachmentReadWrite);
+    image.transition_to(cmd_buffer, surface_layout(state, info_added));
 
     last_written_surface = &info_added;
+    rendered_surface = &info_added;
     info_added.need_surface_sync.reset();
     info_added.need_surface_sync = std::make_shared<bool>(false);
     info_added.dirty = std::make_shared<bool>(false);
@@ -494,6 +524,19 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
     const vk::ImageView color_handle_view = reinterpret_cast<VKContext *>(state.context)->current_color_view;
     const bool is_same_image = (color_handle_view == info.texture.view) || (color_handle_view == info.alternate_view);
 
+    if (state.features.direct_fragcolor) {
+        VKContext *context = reinterpret_cast<VKContext *>(state.context);
+        if (!is_same_image) {
+            // (a surface in GENERAL can be sampled as it is)
+            if (info.texture.layout == vkutil::ImageLayout::ColorAttachment)
+                // the transition must happen before the render pass of this scene
+                info.texture.transition_to(context->prerender_cmd, vkutil::ImageLayout::SampledImage);
+        } else if (state.features.use_texture_viewport && !context->record.color_input_pass) {
+            // the scene samples its own color attachment, which only the render passes reading it allow
+            context->switch_to_color_input_pass();
+        }
+    }
+
     if (state.features.use_texture_viewport && base_format == info.format) {
         // use a texture viewport
         *texture_viewport = {
@@ -611,7 +654,10 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
                     std::min<uint32_t>(height, info.height),
                     1 }
             };
-            cmd_buffer.copyImage(info.texture.image, vk::ImageLayout::eGeneral, casted->texture.image, vk::ImageLayout::eTransferDstOptimal, image_copy);
+            vkutil::ImageLayout previous_layout;
+            const vk::ImageLayout src_layout = begin_surface_read_transfer(cmd_buffer, info.texture, previous_layout);
+            cmd_buffer.copyImage(info.texture.image, src_layout, casted->texture.image, vk::ImageLayout::eTransferDstOptimal, image_copy);
+            end_surface_read_transfer(cmd_buffer, info.texture, previous_layout);
         } else {
             LOG_INFO_ONCE("Game is doing typeless copies");
             // We must use a transition buffer
@@ -635,7 +681,10 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
                     0 },
                 .imageExtent = { info.width, height, 1 }
             };
-            cmd_buffer.copyImageToBuffer(info.texture.image, vk::ImageLayout::eGeneral, casted->transition_buffer.buffer, copy_image_buffer);
+            vkutil::ImageLayout previous_layout;
+            const vk::ImageLayout src_layout = begin_surface_read_transfer(cmd_buffer, info.texture, previous_layout);
+            cmd_buffer.copyImageToBuffer(info.texture.image, src_layout, casted->transition_buffer.buffer, copy_image_buffer);
+            end_surface_read_transfer(cmd_buffer, info.texture, previous_layout);
 
             // then the buffer to the image
             const uint32_t dst_pixel_stride = (stride_bytes / bytes_per_pixel_requested) * state.res_multiplier;
@@ -678,7 +727,7 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_tex
 
         return TextureLookupResult{
             info.alternate_view,
-            vkutil::ImageLayout::ColorAttachmentReadWrite,
+            info.texture.layout,
             vk_format
         };
     }
@@ -1044,7 +1093,7 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_depth_stencil_as_tex
 
 static Framebuffer empty_framebuffer{};
 Framebuffer &VKSurfaceCache::retrieve_framebuffer_handle(MemState &mem, SceGxmColorSurface *color, SceGxmDepthStencilSurface *depth_stencil,
-    vk::RenderPass standard_render_pass, vk::RenderPass interlock_render_pass, vk::ImageView &color_view, vk::ImageView &ds_view) {
+    vk::RenderPass standard_render_pass, vk::RenderPass interlock_render_pass, vk::RenderPass color_input_render_pass, vk::ImageView &color_view, vk::ImageView &ds_view) {
     if (!target) {
         LOG_ERROR("Unable to retrieve framebuffer with no active render target!");
         return empty_framebuffer;
@@ -1055,6 +1104,7 @@ Framebuffer &VKSurfaceCache::retrieve_framebuffer_handle(MemState &mem, SceGxmCo
 
     // might get modified by retrieve_color_surface_for_framebuffer
     state.pipeline_cache.can_use_deferred_compilation = true;
+    rendered_surface = nullptr;
 
     // First retrieve separately the color surface and ds surface
     SurfaceRetrieveResult color_result;
@@ -1099,6 +1149,13 @@ Framebuffer &VKSurfaceCache::retrieve_framebuffer_handle(MemState &mem, SceGxmCo
     fb_info.setAttachments(attachments);
     vk::Framebuffer fb_standard = state.device.createFramebuffer(fb_info);
 
+    vk::Framebuffer fb_color_input = nullptr;
+    if (color_input_render_pass) {
+        // the render passes reading the color attachment are not compatible with the standard ones
+        fb_info.renderPass = color_input_render_pass;
+        fb_color_input = state.device.createFramebuffer(fb_info);
+    }
+
     vk::Framebuffer fb_interlock = nullptr;
     if (state.features.support_shader_interlock) {
         // we also need to create the framebuffer for shader interlock
@@ -1108,7 +1165,7 @@ Framebuffer &VKSurfaceCache::retrieve_framebuffer_handle(MemState &mem, SceGxmCo
         fb_interlock = state.device.createFramebuffer(fb_info);
     }
 
-    return (framebuffer_array[key] = { fb_standard, fb_interlock, color_result.base_image });
+    return (framebuffer_array[key] = { fb_standard, fb_interlock, fb_color_input, color_result.base_image });
 }
 
 bool VKSurfaceCache::check_for_surface(MemState &mem, Address source_address, CallbackRequestFunction &callback, Address target_address) {
@@ -1206,7 +1263,8 @@ ColorSurfaceCacheInfo *VKSurfaceCache::perform_surface_sync() {
     vk::CommandBuffer cmd_buffer = context->render_cmd;
 
     vk::Image image_to_copy = last_written_surface->texture.image;
-    vk::ImageLayout image_layout = vk::ImageLayout::eGeneral;
+    vkutil::ImageLayout previous_layout;
+    vk::ImageLayout image_layout = begin_surface_read_transfer(cmd_buffer, last_written_surface->texture, previous_layout);
 
     // this works for surface swizzles
     bool is_swizzle_identity = last_written_surface->swizzle.r == vk::ComponentSwizzle::eR;
@@ -1282,6 +1340,7 @@ ColorSurfaceCacheInfo *VKSurfaceCache::perform_surface_sync() {
         .imageExtent = { last_written_surface->original_width, last_written_surface->original_height, 1 }
     };
     cmd_buffer.copyImageToBuffer(image_to_copy, image_layout, buffer, copy);
+    end_surface_read_transfer(cmd_buffer, last_written_surface->texture, previous_layout);
 
     ColorSurfaceCacheInfo *return_value = last_written_surface;
     last_written_surface = nullptr;
@@ -1389,7 +1448,7 @@ void VKSurfaceCache::destroy_associated_framebuffers(const VKRenderTarget *rende
     destroy_framebuffers(render_target->depthstencil.view);
 }
 
-vk::ImageView VKSurfaceCache::sourcing_color_surface_for_presentation(Ptr<const void> address, uint32_t pitch, Viewport &viewport) {
+vk::ImageView VKSurfaceCache::sourcing_color_surface_for_presentation(Ptr<const void> address, uint32_t pitch, Viewport &viewport, vk::CommandBuffer cmd_buffer, vk::ImageLayout &layout) {
     // get closest surface with an address below address
     auto ite = color_address_lookup.upper_bound(address.address());
     if (ite == color_address_lookup.begin()) {
@@ -1426,6 +1485,10 @@ vk::ImageView VKSurfaceCache::sourcing_color_surface_for_presentation(Ptr<const 
             viewport.height = limited_height;
             viewport.texture_width = info.width;
             viewport.texture_height = info.height;
+
+            if (info.texture.layout == vkutil::ImageLayout::ColorAttachment)
+                info.texture.transition_to(cmd_buffer, vkutil::ImageLayout::SampledImage);
+            layout = vkutil::get_underlying_layout(info.texture.layout);
 
             if (info.swizzle == vkutil::rgba_mapping && info.texture.format == vk::Format::eR8G8B8A8Unorm)
                 return info.texture.view;
@@ -1487,7 +1550,27 @@ std::vector<uint32_t> VKSurfaceCache::dump_frame(Ptr<const void> address, uint32
         .imageOffset = { 0, static_cast<int>(line_delta), 0 },
         .imageExtent = { width, real_height, 1 }
     };
-    cmd_buffer.copyImageToBuffer(info.texture.image, vk::ImageLayout::eGeneral, temp_buff.buffer, image_copy);
+    // this is not called from the render thread, so the layout the renderer keeps track of is left as it is
+    const vk::ImageLayout layout = vkutil::get_underlying_layout(info.texture.layout);
+    vk::ImageMemoryBarrier barrier{
+        .srcAccessMask = vk::AccessFlagBits::eMemoryWrite,
+        .dstAccessMask = vk::AccessFlagBits::eTransferRead,
+        .oldLayout = layout,
+        .newLayout = vk::ImageLayout::eTransferSrcOptimal,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = info.texture.image,
+        .subresourceRange = vkutil::color_subresource_range
+    };
+    if (layout != vk::ImageLayout::eGeneral)
+        cmd_buffer.pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands, vk::PipelineStageFlagBits::eTransfer, {}, {}, {}, barrier);
+    cmd_buffer.copyImageToBuffer(info.texture.image, (layout == vk::ImageLayout::eGeneral) ? layout : vk::ImageLayout::eTransferSrcOptimal, temp_buff.buffer, image_copy);
+    if (layout != vk::ImageLayout::eGeneral) {
+        std::swap(barrier.oldLayout, barrier.newLayout);
+        barrier.srcAccessMask = vk::AccessFlagBits::eTransferRead;
+        barrier.dstAccessMask = vk::AccessFlagBits::eMemoryRead | vk::AccessFlagBits::eMemoryWrite;
+        cmd_buffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eAllCommands, {}, {}, {}, barrier);
+    }
 
     // this will cause a waitIdle, not an issue
     vkutil::end_single_time_command(state.device, state.general_queue, state.general_command_pool, cmd_buffer);

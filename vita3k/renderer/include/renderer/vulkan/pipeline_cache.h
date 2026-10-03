@@ -81,7 +81,8 @@ private:
     // first index: 0 if color is backed by memory, 1 otherwise
     // second index: 1 if depth-stencil is force loaded, 0 otherwise
     // third index: 1 if depth-stencil is force stored, 0 otherwise
-    std::map<vk::Format, vk::RenderPass> render_passes[2][2][2];
+    // fourth index: 1 if the color attachment can be read as an input attachment, 0 otherwise
+    std::map<vk::Format, vk::RenderPass> render_passes[2][2][2][2];
     // render passes used along shader interlock
     std::map<vk::Format, vk::RenderPass> shader_interlock_pass;
 
@@ -129,7 +130,7 @@ public:
     void read_pipeline_cache();
     void save_pipeline_cache();
 
-    vk::RenderPass retrieve_render_pass(vk::Format format, bool force_load, bool force_store, bool is_color_transient, bool no_color = false);
+    vk::RenderPass retrieve_render_pass(vk::Format format, bool force_load, bool force_store, bool is_color_transient, bool no_color = false, bool color_input = true);
     vk::Pipeline retrieve_pipeline(VKContext &context, SceGxmPrimitiveType &type, bool consider_for_async, MemState &mem);
 
     vk::ShaderModule precompile_shader(const Sha256Hash &hash, bool search_first = true);
