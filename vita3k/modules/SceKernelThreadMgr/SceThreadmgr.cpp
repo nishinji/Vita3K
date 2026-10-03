@@ -1073,8 +1073,9 @@ static int delay_thread(KernelState &kernel, SceUID thread_id, SceUInt delay_us)
     constexpr auto coarse_margin = std::chrono::milliseconds(2);
     if (!thread->status_cond.wait_until(lock, deadline - coarse_margin, woken)) {
         lock.unlock();
-        // only frame pacing needs that accuracy; spinning through polling delays would waste a host core
-        util::sleep_until_precise(deadline, delay_us >= 4000);
+        // only frame pacing needs that accuracy; spinning through polling delays (1 ms in Persona 4 Golden,
+        // 4 ms in Project DIVA F 2nd) would waste a host core
+        util::sleep_until_precise(deadline, delay_us >= 8000);
         lock.lock();
     }
     if (thread->status != ThreadStatus::run)
