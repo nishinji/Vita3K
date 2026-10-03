@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <memory>
 #include <string_view>
+#include <vector>
 
 namespace ddspp {
 struct Descriptor;
@@ -39,7 +40,8 @@ struct YUVConversionCache {
     void *sws_context = nullptr;
     size_t width = 0;
     size_t height = 0;
-    bool is_p3 = false;
+    // the chroma planes of a YUV420P2 texture, split
+    std::vector<uint8_t> chroma;
 };
 
 enum class Backend : uint32_t;
