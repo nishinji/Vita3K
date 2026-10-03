@@ -108,6 +108,9 @@ public:
     Backend backend;
     bool use_protect = false;
     YUVConversionCache yuv_conversion_cache;
+    // conversion buffers of upload_texture, kept to not allocate and fault in large buffers on every upload
+    std::vector<uint8_t> texture_data_decompressed;
+    std::vector<uint8_t> texture_pixels_lineared;
     // use a separate sampler cache
     bool use_sampler_cache = false;
     int anisotropic_filtering = 1;
