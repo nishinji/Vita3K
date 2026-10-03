@@ -22,6 +22,9 @@
 #include <kernel/types.h>
 #include <util/lock_and_find.h>
 #include <util/log.h>
+#include <util/precise_sleep.h>
+
+#include <algorithm>
 
 static constexpr bool LOG_SYNC_PRIMITIVES = false;
 
@@ -464,21 +467,33 @@ SceInt32 timer_waitorpoll(KernelState &kernel, const char *export_name, SceUID t
 
         const auto data_it = timer->waiting_threads->push(data);
 
-        bool got_event = false;
-        while (!got_event) {
-            uint64_t wait_time = timer->next_event - current_time;
-            // wait before we got an event and we are the first thread in the waiting list
-            timer->condvar.wait_for(lock, std::chrono::microseconds(wait_time), [&] {
-                return thread->status == ThreadStatus::run
-                    || (*timer->waiting_threads->begin()).thread->id == thread_id;
-            });
+        // a timed wait on the condition variable can end about the host timer resolution (1 ms) late, so the first
+        // waiting thread only waits on it until the event is this close (in microseconds), then sleeps precisely
+        constexpr uint64_t precise_sleep_margin = 2000;
+        // upper bound of a single wait, nothing may notify the condition variable when the wait is cancelled
+        constexpr uint64_t max_sleep = 100'000;
+        while (true) {
             if (thread->status == ThreadStatus::run) {
                 timer->waiting_threads->erase(data_it);
                 timer->condvar.notify_all();
                 return SCE_KERNEL_ERROR_WAIT_CANCEL;
             }
+
+            // only the first thread in the waiting list can get the event
+            const bool is_first = (*timer->waiting_threads->begin()).thread->id == thread_id;
             current_time = get_current_time();
-            got_event = timer->event_set || current_time > timer->next_event;
+            if (is_first && (timer->event_set || current_time > timer->next_event))
+                break;
+
+            const uint64_t time_left = (timer->next_event > current_time) ? timer->next_event - current_time : 0;
+            if (!is_first || time_left > precise_sleep_margin) {
+                const uint64_t sleep_time = is_first ? std::min(time_left - precise_sleep_margin, max_sleep) : max_sleep;
+                timer->condvar.wait_for(lock, std::chrono::microseconds(sleep_time));
+            } else {
+                lock.unlock();
+                util::sleep_until_precise(std::chrono::steady_clock::now() + std::chrono::microseconds(time_left), true);
+                lock.lock();
+            }
         }
 
         timer->waiting_threads->pop();
