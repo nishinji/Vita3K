@@ -24,14 +24,13 @@ extern "C" {
 
 namespace renderer::texture {
 
-static SwsContext *get_sws_context(YUVConversionCache &cache, size_t width, size_t height, bool is_p3) {
+static SwsContext *get_sws_context(YUVConversionCache &cache, size_t width, size_t height) {
     bool recreate = false;
     auto *context = static_cast<SwsContext *>(cache.sws_context);
-    if (cache.width != width || cache.height != height || cache.is_p3 != is_p3) {
+    if (cache.width != width || cache.height != height) {
         recreate = true;
         cache.width = width;
         cache.height = height;
-        cache.is_p3 = is_p3;
     } else if (context == nullptr) {
         recreate = true;
     }
@@ -41,8 +40,8 @@ static SwsContext *get_sws_context(YUVConversionCache &cache, size_t width, size
             sws_freeContext(context);
             context = nullptr;
         }
-        const AVPixelFormat format = is_p3 ? AV_PIX_FMT_YUV420P : AV_PIX_FMT_NV12;
-        context = sws_getContext(width, height, format, width, height, AV_PIX_FMT_RGB0,
+        // swscale has a fast (SIMD) path converting YUV420P to RGBA of the same size, but not NV12 or RGB0
+        context = sws_getContext(width, height, AV_PIX_FMT_YUV420P, width, height, AV_PIX_FMT_RGBA,
             0, nullptr, nullptr, nullptr);
         cache.sws_context = context;
     }
@@ -50,24 +49,33 @@ static SwsContext *get_sws_context(YUVConversionCache &cache, size_t width, size
 }
 
 void yuv420_texture_to_rgb(YUVConversionCache &cache, uint8_t *dst, const uint8_t *src, uint32_t width, uint32_t height, uint32_t layout_width, uint32_t layout_height, bool is_p3) {
-    SwsContext *context = get_sws_context(cache, width, height, is_p3);
+    SwsContext *context = get_sws_context(cache, width, height);
     assert(context);
 
     const uint8_t *slices[] = {
         src, // Y Slice
-        src + layout_width * layout_height, // U(V for P2) Slice
-        src + layout_width * layout_height + layout_width * layout_height / 4, // V Slice (for P3)
+        src + layout_width * layout_height, // U Slice
+        src + layout_width * layout_height + layout_width * layout_height / 4, // V Slice
     };
 
-    int strides[] = {
+    const int strides[] = {
         static_cast<int>(width),
         static_cast<int>(width / 2),
         static_cast<int>(width / 2),
     };
     if (!is_p3) {
-        // src only have two slices
-        strides[1] = static_cast<int>(width);
-        strides[2] = 0;
+        // the U and V samples are interleaved in a single plane, split them
+        const uint8_t *uv = src + layout_width * layout_height;
+        const size_t chroma_size = (width / 2) * (height / 2);
+        cache.chroma.resize(chroma_size * 2);
+        uint8_t *u = cache.chroma.data();
+        uint8_t *v = u + chroma_size;
+        for (size_t i = 0; i < chroma_size; i++) {
+            u[i] = uv[2 * i];
+            v[i] = uv[2 * i + 1];
+        }
+        slices[1] = u;
+        slices[2] = v;
     }
 
     uint8_t *dst_slices[] = {
