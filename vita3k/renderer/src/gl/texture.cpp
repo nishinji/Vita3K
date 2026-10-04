@@ -116,7 +116,9 @@ static GLenum linear_to_srgb(const GLenum format) {
         return COMPRESSED_SRGB_ALPHA_S3TC_DXT5;
     case GL_COMPRESSED_RGBA_BPTC_UNORM:
         return GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM;
-#define ASTC_FMT(b_x, b_y)                              case GL_COMPRESSED_RGBA_ASTC_##b_x##x##b_y:         return GL_COMPRESSED_SRGB8_ALPHA8_ASTC_##b_x##x##b_y;
+#define ASTC_FMT(b_x, b_y)                      \
+    case GL_COMPRESSED_RGBA_ASTC_##b_x##x##b_y: \
+        return GL_COMPRESSED_SRGB8_ALPHA8_ASTC_##b_x##x##b_y;
 
 #include "../texture/astc_formats.inc"
 #undef ASTC_FMT
