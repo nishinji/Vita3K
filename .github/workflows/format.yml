@@ -4,12 +4,16 @@ on:
   push:
     paths:
       - .clang-format
+      - .ci/check-format.sh
+      - .github/workflows/format.yml
       - vita3k/**
       - tools/**
 
   pull_request:
     paths:
       - .clang-format
+      - .ci/check-format.sh
+      - .github/workflows/format.yml
       - vita3k/**
       - tools/**
 
@@ -29,9 +33,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          sparse-checkout: ${{ matrix.path }}
+          sparse-checkout: |
+            .ci
+            ${{ matrix.path }}
+
+      - name: Install clang-format
+        run: pipx install clang-format==22.1.8
 
       - name: Format check
-        uses: jidicula/clang-format-action@v4.18.0
+        run: bash .ci/check-format.sh ${{ matrix.path }}
+        env:
+          PATCH_FILE: clang-format-${{ matrix.path }}.patch
+
+      - name: Upload patch
+        if: failure() && hashFiles(format('clang-format-{0}.patch', matrix.path)) != ''
+        uses: actions/upload-artifact@v7
         with:
-          check-path: ${{ matrix.path }}
+          name: clang-format-patch-${{ matrix.path }}
+          path: clang-format-${{ matrix.path }}.patch
