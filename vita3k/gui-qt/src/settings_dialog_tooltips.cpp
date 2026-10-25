@@ -36,6 +36,8 @@ QString restart_required_setting_label(config::RestartRequiredSetting setting) {
         return QCoreApplication::translate("SettingsDialogTooltips", "Rendering Accuracy");
     case config::RestartRequiredSetting::ResolutionMultiplier:
         return QCoreApplication::translate("SettingsDialogTooltips", "Internal Resolution Upscaling");
+    case config::RestartRequiredSetting::Msaa:
+        return QCoreApplication::translate("SettingsDialogTooltips", "Multisample Anti-Aliasing");
     case config::RestartRequiredSetting::MemoryMapping:
         return QCoreApplication::translate("SettingsDialogTooltips", "Memory Mapping");
     case config::RestartRequiredSetting::AudioBackend:
@@ -115,6 +117,7 @@ SettingsDialogTooltips::SettingsDialogTooltips(QObject *parent)
     , gpu_device(tr("Select which GPU Vita3k should use."))
     , resolution_upscaling(tr("Scale the games resolution by a multiplier.\nExperimental: apps are not guaranteed to render properly at more than 1x."))
     , anisotropic_filtering(tr("Technique to increase the sharpness of textures which are sloped relative to the viewer.\nIt has no drawbacks but can impact performance on older GPUs."))
+    , msaa(tr("Smooths the edges of the 3D geometry by rendering with multiple samples per pixel.\nOnly available with Vulkan, the scenes reading the framebuffer from their shaders are not anti-aliased.\nA restart is required for the change to take effect."))
     , export_textures(tr("Export textures used by the app to the textures folder."))
     , import_textures(tr("Import replacement textures from the textures folder."))
     , texture_export_format(tr("Format to export textures in."))

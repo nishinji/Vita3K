@@ -418,6 +418,10 @@ void draw(VKContext &context, SceGxmPrimitiveType type, SceGxmIndexFormat format
     const bool masked_fetch = uses_framebuffer_fetch && context.state.features.should_use_shader_interlock()
         && context.state.features.use_mask_bit && context.render_target->mask_may_reject;
     const bool ordered_fetch = masked_fetch && !context.state.support_rasterized_order_access;
+
+    // the framebuffer is read in the shader, which only works with single sampled attachments
+    if (uses_framebuffer_fetch && context.msaa_active)
+        context.disable_msaa();
     if (context.shader_hints.masked_framebuffer_fetch != masked_fetch) {
         context.shader_hints.masked_framebuffer_fetch = masked_fetch;
         context.refresh_pipeline = true;
@@ -440,7 +444,7 @@ void draw(VKContext &context, SceGxmPrimitiveType type, SceGxmIndexFormat format
     // we need to always load the depth-stencil after the first draw
     if (!maskupdate && context.is_first_scene_draw && (context.state.features.support_shader_interlock || context.state.features.use_mask_bit || context.ignore_macroblock)) {
         // update the render pass to load and store the depth and stencil
-        context.current_render_pass = context.state.pipeline_cache.retrieve_render_pass(context.current_color_format, true, true, !context.record.color_surface.data);
+        context.current_render_pass = context.retrieve_scene_render_pass(true, true);
         context.is_first_scene_draw = false;
     }
 

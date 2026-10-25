@@ -356,6 +356,13 @@ void SettingsDialog::load_config() {
         m_ui->memory_mapping_box->setCurrentIndex(current_idx);
     }
 
+    m_ui->msaa_box->clear();
+    m_ui->msaa_box->addItem(tr("Off"), 1);
+    for (const int samples : { 2, 4, 8 })
+        m_ui->msaa_box->addItem(QStringLiteral("%1x").arg(samples), samples);
+    const int msaa_idx = m_ui->msaa_box->findData(m_config.msaa_samples);
+    m_ui->msaa_box->setCurrentIndex(msaa_idx >= 0 ? msaa_idx : 0);
+
     m_ui->resolution_upscale->setMinimum(2);
     m_ui->resolution_upscale->setMaximum(32);
     m_ui->resolution_upscale->setSingleStep(1);
@@ -617,6 +624,7 @@ void SettingsDialog::build_desired_config(Config &desired) const {
     current.screen_filter = m_ui->screen_filter_box->currentText().toStdString();
     current.resolution_multiplier = static_cast<float>(m_ui->resolution_upscale->value()) / 4.0f;
     current.anisotropic_filtering = 1 << m_ui->anisotropic_filter->value();
+    current.msaa_samples = m_ui->msaa_box->currentData().toInt();
     current.export_textures = m_ui->export_textures->isChecked();
     current.import_textures = m_ui->import_textures->isChecked();
     current.export_as_png = m_ui->texture_export_format->currentIndex() == 0;
@@ -1200,6 +1208,7 @@ void SettingsDialog::setup_connections() {
         { m_ui->disable_surface_sync, tr("Disable Surface Sync"), m_tooltips->disable_surface_sync },
         { m_ui->async_pipeline_compilation, tr("Asynchronous Pipeline Compilation"), m_tooltips->async_pipeline },
         { m_ui->memory_mapping_box, tr("Memory Mapping"), m_tooltips->memory_mapping },
+        { m_ui->msaa_box, tr("Multisample Anti-Aliasing"), m_tooltips->msaa },
         { m_ui->screen_filter_box, tr("Screen Filter"), m_tooltips->screen_filter },
         { m_ui->gb_gpu_device, tr("Graphics Device"), m_tooltips->gpu_device },
         { m_ui->gpu_device_box, tr("Graphics Device"), m_tooltips->gpu_device },

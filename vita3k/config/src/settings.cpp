@@ -46,6 +46,7 @@ void copy_global_to_current(Config::CurrentConfig &current, const Config &cfg) {
     current.memory_mapping = cfg.memory_mapping;
     current.v_sync = cfg.v_sync;
     current.anisotropic_filtering = cfg.anisotropic_filtering;
+    current.msaa_samples = cfg.msaa_samples;
     current.async_pipeline_compilation = cfg.async_pipeline_compilation;
     current.import_textures = cfg.import_textures;
     current.export_textures = cfg.export_textures;
@@ -91,6 +92,7 @@ void copy_current_to_global(Config &cfg, const Config::CurrentConfig &current) {
     cfg.memory_mapping = current.memory_mapping;
     cfg.v_sync = current.v_sync;
     cfg.anisotropic_filtering = current.anisotropic_filtering;
+    cfg.msaa_samples = current.msaa_samples;
     cfg.async_pipeline_compilation = current.async_pipeline_compilation;
     cfg.import_textures = current.import_textures;
     cfg.export_textures = current.export_textures;
@@ -140,6 +142,7 @@ std::vector<RestartRequiredSetting> get_restart_required_settings(
 #endif
     append_if_changed(before.high_accuracy != after.high_accuracy, RestartRequiredSetting::HighAccuracy);
     append_if_changed(before.resolution_multiplier != after.resolution_multiplier, RestartRequiredSetting::ResolutionMultiplier);
+    append_if_changed(before.msaa_samples != after.msaa_samples, RestartRequiredSetting::Msaa);
     append_if_changed(before.memory_mapping != after.memory_mapping, RestartRequiredSetting::MemoryMapping);
     append_if_changed(before.audio_backend != after.audio_backend, RestartRequiredSetting::AudioBackend);
     append_if_changed(before.validation_layer != after.validation_layer, RestartRequiredSetting::ValidationLayer);
@@ -193,6 +196,7 @@ bool load_custom_config(Config::CurrentConfig &out, const fs::path &config_path,
         out.memory_mapping = gpu.attribute("memory-mapping").as_string();
         out.v_sync = gpu.attribute("v-sync").as_bool();
         out.anisotropic_filtering = gpu.attribute("anisotropic-filtering").as_int();
+        out.msaa_samples = gpu.attribute("msaa-samples").as_int(1);
         out.async_pipeline_compilation = gpu.attribute("async-pipeline-compilation").as_bool();
         out.import_textures = gpu.attribute("import-textures").as_bool();
         out.export_textures = gpu.attribute("export-textures").as_bool();
@@ -281,6 +285,7 @@ bool save_custom_config(const Config::CurrentConfig &cc, const fs::path &config_
     gpu_child.append_attribute("memory-mapping") = cc.memory_mapping.c_str();
     gpu_child.append_attribute("v-sync") = cc.v_sync;
     gpu_child.append_attribute("anisotropic-filtering") = cc.anisotropic_filtering;
+    gpu_child.append_attribute("msaa-samples") = cc.msaa_samples;
     gpu_child.append_attribute("async-pipeline-compilation") = cc.async_pipeline_compilation;
     gpu_child.append_attribute("import-textures") = cc.import_textures;
     gpu_child.append_attribute("export-textures") = cc.export_textures;

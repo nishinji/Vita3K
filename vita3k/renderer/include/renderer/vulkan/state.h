@@ -116,6 +116,11 @@ struct VKState : public renderer::State {
     bool support_standard_layout = false;
     bool support_rasterized_order_access = false;
     bool support_native_rgba4_surface = false;
+    bool support_properties2 = false;
+    // can the depth-stencil of a multisampled render pass be resolved in the render pass
+    bool support_depth_stencil_resolve = false;
+    // sample count of the multisampled render passes, 1 if msaa is disabled
+    vk::SampleCountFlagBits msaa_samples = vk::SampleCountFlagBits::e1;
     LinuxSurfaceType linux_surface_type = LinuxSurfaceType::Unknown;
 
 #ifdef __ANDROID__
@@ -128,6 +133,8 @@ struct VKState : public renderer::State {
     bool init() override;
     bool create(std::unique_ptr<renderer::State> &state, const Config &config);
     void late_init(const Config &cfg, const std::string_view game_id, MemState &mem) override;
+    // return the highest supported sample count that does not exceed the requested one
+    vk::SampleCountFlagBits select_msaa_samples(int requested);
     void cleanup() override;
 
     TextureCache *get_texture_cache() override {

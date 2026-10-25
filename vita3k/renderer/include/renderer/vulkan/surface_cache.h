@@ -60,6 +60,14 @@ struct Framebuffer {
     vk::Framebuffer shader_interlock;
     // base color image used by the framebuffer
     vkutil::Image *base_image;
+    // framebuffer used by the msaa render pass, its attachments are the multisampled color and depth-stencil
+    // followed by the single sampled ones they are resolved into
+    vk::Framebuffer msaa;
+    // framebuffer used to fill the multisampled color from the single sampled one
+    vk::Framebuffer msaa_unresolve;
+    // multisampled color and depth-stencil views used by the two framebuffers above
+    vk::ImageView msaa_color_view;
+    vk::ImageView msaa_depth_view;
 };
 
 struct CastedTexture {
@@ -97,6 +105,9 @@ struct ColorSurfaceCacheInfo : public SurfaceCacheInfo {
 
     // only used when upscaling is enabled, to downscale the image first
     std::unique_ptr<vkutil::Image> blit_image;
+
+    // multisampled image rendered to when msaa is enabled, it is resolved into texture
+    std::unique_ptr<vkutil::Image> msaa_image;
 
     // staging for surfaces whose GPU format differs from the guest memory layout
     std::unique_ptr<vkutil::Buffer> copy_buffer;
@@ -157,6 +168,8 @@ struct TextureLookupResult {
 struct SurfaceRetrieveResult {
     vk::ImageView view;
     vkutil::Image *base_image;
+    // only set for the color surfaces backed by memory
+    ColorSurfaceCacheInfo *color_info = nullptr;
 };
 
 class VKSurfaceCache {
@@ -192,6 +205,9 @@ private:
     void destroy_surface(ColorSurfaceCacheInfo &info);
     void destroy_surface(DepthStencilSurfaceCacheInfo &info);
 
+    // retrieve the multisampled image used with the given color surface, (re-)creating it if necessary
+    vkutil::Image &retrieve_msaa_color_image(ColorSurfaceCacheInfo &info, vk::Format format);
+
 public:
     // when creating a mutable image, can we pass as an argument
     // the possible format used for an image view to improve performance ?
@@ -211,8 +227,11 @@ public:
     SurfaceRetrieveResult retrieve_depth_stencil_for_framebuffer(SceGxmDepthStencilSurface *depth_stencil, const uint32_t width, const uint32_t height);
     std::optional<TextureLookupResult> retrieve_depth_stencil_as_texture(const SceGxmTexture &texture, TextureViewport *texture_viewport);
 
+    // if msaa_render_pass is not null, the multisampled framebuffers are also created
+    // (framebuffer.msaa stays null if it is not possible)
     Framebuffer &retrieve_framebuffer_handle(MemState &mem, SceGxmColorSurface *color, SceGxmDepthStencilSurface *depth_stencil,
-        vk::RenderPass standard_render_pass, vk::RenderPass interlock_render_pass, vk::ImageView &color_view, vk::ImageView &ds_view);
+        vk::RenderPass standard_render_pass, vk::RenderPass interlock_render_pass, vk::ImageView &color_view, vk::ImageView &ds_view,
+        vk::RenderPass msaa_render_pass = nullptr, vk::RenderPass msaa_unresolve_pass = nullptr, vk::Format color_format = vk::Format::eUndefined);
 
     // Check if the address is one of a used surface
     // If it is the case, this function returns true, moves the callback

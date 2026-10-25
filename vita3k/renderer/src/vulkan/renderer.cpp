@@ -426,6 +426,8 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
             auto ite = optional_instance_extensions.find(prop.extensionName);
             if (ite != optional_instance_extensions.end()) {
                 instance_extensions.push_back(ite->c_str());
+                if (*ite == vk::KHRGetPhysicalDeviceProperties2ExtensionName)
+                    support_properties2 = true;
 #ifdef __APPLE__
                 if (*ite == vk::EXTLayerSettingsExtensionName)
                     has_layer_settings_extension = true;
@@ -648,6 +650,9 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
         bool support_external_memory = false;
         bool support_shader_interlock = false;
         bool support_image_view_usage = false;
+        bool support_multiview = false;
+        bool support_create_renderpass2 = false;
+        bool support_depth_stencil_resolve_extension = false;
         const std::map<std::string_view, bool *> optional_extensions = {
             { vk::KHRGetMemoryRequirements2ExtensionName, &temp_bool },
             // can be used by vma to improve performance
@@ -676,6 +681,10 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
 #endif
             // used for coherent framebuffer fetch
             { VK_EXT_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_EXTENSION_NAME, &support_rasterized_order_access },
+            // needed to resolve the depth-stencil of the multisampled render passes
+            { vk::KHRMultiviewExtensionName, &support_multiview },
+            { vk::KHRCreateRenderpass2ExtensionName, &support_create_renderpass2 },
+            { vk::KHRDepthStencilResolveExtensionName, &support_depth_stencil_resolve_extension },
 #ifdef __ANDROID__
             // dependencies of VK_ANDROID_external_memory_android_hardware_buffer
             { VK_KHR_BIND_MEMORY_2_EXTENSION_NAME, &temp_bool },
@@ -694,6 +703,15 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
                 *it->second = true;
                 device_extensions.push_back(it->first.data());
             }
+        }
+
+        support_depth_stencil_resolve = support_properties2 && support_multiview && support_create_renderpass2
+            && support_depth_stencil_resolve_extension && support_image_view_usage;
+        if (support_depth_stencil_resolve) {
+            const auto props = physical_device.getProperties2KHR<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceDepthStencilResolveProperties>();
+            const auto &resolve_props = props.get<vk::PhysicalDeviceDepthStencilResolveProperties>();
+            support_depth_stencil_resolve = static_cast<bool>(resolve_props.supportedDepthResolveModes & vk::ResolveModeFlagBits::eSampleZero)
+                && static_cast<bool>(resolve_props.supportedStencilResolveModes & vk::ResolveModeFlagBits::eSampleZero);
         }
 
         bool support_memory_mapping = true;
@@ -1017,9 +1035,48 @@ void VKState::late_init(const Config &cfg, const std::string_view game_id, MemSt
         || std::string_view(physical_device_properties.deviceName).contains("NVIDIA");
 #endif
 
+    msaa_samples = select_msaa_samples(cfg.current_config.msaa_samples);
+    if (msaa_samples != vk::SampleCountFlagBits::e1)
+        LOG_INFO("Using {}x MSAA", static_cast<uint32_t>(msaa_samples));
+
     pipeline_cache.init(support_rasterized_order_access);
 
     texture_cache.init(true, texture_folder(), game_id);
+}
+
+vk::SampleCountFlagBits VKState::select_msaa_samples(int requested) {
+    if (requested <= 1)
+        return vk::SampleCountFlagBits::e1;
+
+    if (!support_depth_stencil_resolve || deep_stencil_use == vk::Format::eD16Unorm) {
+        LOG_WARN("MSAA is not supported by this GPU, disabling it");
+        return vk::SampleCountFlagBits::e1;
+    }
+
+    const vk::PhysicalDeviceLimits &limits = physical_device_properties.limits;
+    vk::SampleCountFlags supported = limits.framebufferColorSampleCounts & limits.framebufferDepthSampleCounts & limits.framebufferStencilSampleCounts;
+
+    const auto restrict_to_format = [&](vk::Format format, vk::ImageUsageFlags usage) {
+        vk::ImageFormatProperties properties;
+        const vk::Result result = physical_device.getImageFormatProperties(format, vk::ImageType::e2D, vk::ImageTiling::eOptimal, usage, {}, &properties);
+        supported &= result == vk::Result::eSuccess ? properties.sampleCounts : vk::SampleCountFlags();
+    };
+    restrict_to_format(vk::Format::eR8G8B8A8Unorm, vk::ImageUsageFlagBits::eColorAttachment);
+    restrict_to_format(vk::Format::eR8G8B8A8Srgb, vk::ImageUsageFlagBits::eColorAttachment);
+    restrict_to_format(vk::Format::eR16G16B16A16Sfloat, vk::ImageUsageFlagBits::eColorAttachment);
+    restrict_to_format(deep_stencil_use, vk::ImageUsageFlagBits::eDepthStencilAttachment);
+
+    constexpr std::array candidates = { vk::SampleCountFlagBits::e8, vk::SampleCountFlagBits::e4, vk::SampleCountFlagBits::e2 };
+    for (const auto candidate : candidates) {
+        if (static_cast<uint32_t>(candidate) <= static_cast<uint32_t>(requested) && (supported & candidate)) {
+            if (static_cast<uint32_t>(candidate) != static_cast<uint32_t>(requested))
+                LOG_WARN("{}x MSAA is not supported by this GPU, using {}x instead", requested, static_cast<uint32_t>(candidate));
+            return candidate;
+        }
+    }
+
+    LOG_WARN("MSAA is not supported by this GPU, disabling it");
+    return vk::SampleCountFlagBits::e1;
 }
 
 void VKState::cleanup() {
@@ -1041,6 +1098,7 @@ void VKState::cleanup() {
         for (auto &descriptor : frames[i].frag_descriptors)
             release_descriptor_sets(descriptor);
         release_descriptor_sets(frames[i].color_descriptor);
+        release_descriptor_sets(frames[i].msaa_descriptor);
     }
 
     pipeline_cache.cleanup();

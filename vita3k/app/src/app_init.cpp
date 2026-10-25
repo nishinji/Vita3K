@@ -218,6 +218,9 @@ static Config::CurrentConfig get_runtime_current_config_after_save(
         case config::RestartRequiredSetting::ResolutionMultiplier:
             runtime_current.resolution_multiplier = previous_current.resolution_multiplier;
             break;
+        case config::RestartRequiredSetting::Msaa:
+            runtime_current.msaa_samples = previous_current.msaa_samples;
+            break;
         case config::RestartRequiredSetting::MemoryMapping:
             runtime_current.memory_mapping = previous_current.memory_mapping;
             break;

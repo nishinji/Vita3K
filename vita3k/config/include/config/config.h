@@ -153,6 +153,7 @@ using PhysicalKeyCode = input::PhysicalKeyCode;
     code(std::string, "screen-filter", "Bilinear", screen_filter)                                       \
     code(bool, "v-sync", true, v_sync)                                                                  \
     code(int, "anisotropic-filtering", 1, anisotropic_filtering)                                        \
+    code(int, "msaa-samples", 1, msaa_samples)                                                          \
     code(bool, "texture-cache", true, texture_cache)                                                    \
     code(bool, "async-pipeline-compilation", true, async_pipeline_compilation)                          \
     code(bool, "show-compile-shaders", true, show_compile_shaders)                                      \

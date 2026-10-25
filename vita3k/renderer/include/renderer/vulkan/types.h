@@ -113,6 +113,9 @@ struct FrameObject {
     // descriptor for the color surface
     FrameDescriptor color_descriptor;
 
+    // descriptor for the single sampled color surface read by the msaa unresolve pass
+    FrameDescriptor msaa_descriptor;
+
     // destroy gpu objects MAX_FRAMES_RENDERING frames later to make sure they are no longer being used
     vkutil::DestroyQueue destroy_queue;
 };
@@ -338,6 +341,18 @@ struct VKContext : public renderer::Context {
     // special case where we can't determine the current macroblock
     bool ignore_macroblock = false;
 
+    // true while the scene is rendered to the multisampled attachments (see set_context)
+    bool msaa_active = false;
+    // has a multisampled render pass been started in this scene
+    bool msaa_used = false;
+    // does the multisampled color still have to be filled with the content of the single sampled one
+    bool msaa_unresolve_pending = false;
+    // what the scene uses once msaa is disabled
+    vk::RenderPass standard_render_pass;
+    vk::Framebuffer standard_framebuffer;
+    vk::Framebuffer msaa_unresolve_framebuffer;
+    vk::Extent2D msaa_unresolve_extent;
+
     // used if necessary to restart easily the render pass
     vk::RenderPassBeginInfo curr_renderpass_info;
     // only useful if shader interlock is enabled, to know if we need to transition
@@ -356,6 +371,10 @@ struct VKContext : public renderer::Context {
     void start_recording(bool first_in_scene = false);
     void start_render_pass(bool create_descriptor_set = true, bool maskupdate = false);
     void stop_render_pass();
+    // render pass to use for the rest of the scene when the depth-stencil is loaded (and stored if force_store)
+    vk::RenderPass retrieve_scene_render_pass(bool force_load, bool force_store);
+    // finish the scene with the single sampled attachments (the multisampled ones are resolved into them)
+    void disable_msaa();
     void begin_visibility_query();
     void end_visibility_query();
     void resolve_visibility_queries();
@@ -366,6 +385,7 @@ struct VKContext : public renderer::Context {
 
 private:
     void wait_thread_function(const MemState &mem);
+    void record_msaa_unresolve();
 };
 
 struct VKRenderTarget : public renderer::RenderTarget {
@@ -374,6 +394,8 @@ struct VKRenderTarget : public renderer::RenderTarget {
     uint16_t height;
     vkutil::Image color;
     vkutil::Image depthstencil;
+    // multisampled depth-stencil, only created when msaa is enabled
+    vkutil::Image depthstencil_ms;
     vkutil::Image mask;
     vk::Framebuffer mask_framebuffer;
     bool mask_may_reject = true;

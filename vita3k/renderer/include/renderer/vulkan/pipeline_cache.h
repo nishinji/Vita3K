@@ -87,6 +87,15 @@ private:
     vk::RenderPass mask_render_pass;
     vk::ShaderModule mask_test_shader;
 
+    // multisampled render passes which resolve into the single sample attachments, the index is 1 if the depth-stencil is loaded
+    std::map<vk::Format, vk::RenderPass> msaa_render_passes[2];
+    // used to fill the multisampled color attachment with the content of the single sample one
+    std::map<vk::Format, vk::RenderPass> msaa_unresolve_passes;
+    std::map<vk::Format, vk::Pipeline> msaa_unresolve_pipelines;
+    vk::PipelineLayout msaa_unresolve_pipeline_layout;
+    vk::ShaderModule msaa_unresolve_vertex_shader;
+    vk::ShaderModule msaa_unresolve_fragment_shader;
+
     // only used when accessing the shaders map
     std::mutex shaders_mutex;
     // because of multithreading, we want the pointers to remain stable
@@ -105,7 +114,7 @@ private:
     // each pipeline compiler thread uses this function as its entrypoint
     void compiler_thread(MemState &mem);
 
-    vk::Pipeline compile_pipeline(SceGxmPrimitiveType type, vk::RenderPass render_pass, const SceGxmVertexProgram &vertex_program_gxm, const SceGxmFragmentProgram &fragment_program_gxm, const GxmRecordState &record, const shader::Hints &hints, MemState &mem);
+    vk::Pipeline compile_pipeline(SceGxmPrimitiveType type, vk::RenderPass render_pass, vk::SampleCountFlagBits samples, const SceGxmVertexProgram &vertex_program_gxm, const SceGxmFragmentProgram &fragment_program_gxm, const GxmRecordState &record, const shader::Hints &hints, MemState &mem);
 
 public:
     // if not 0, next time the pipeline cache should be saved (in seconds since epoch)
@@ -118,6 +127,8 @@ public:
     vk::DescriptorSetLayout uniforms_layout;
     // used for the mask, color attachment
     vk::DescriptorSetLayout attachments_layout;
+    // single sampled image, the source of the msaa unresolve pass
+    vk::DescriptorSetLayout msaa_unresolve_layout;
     std::array<vk::DescriptorSetLayout, 17> vertex_textures_layout;
     std::array<vk::DescriptorSetLayout, 17> fragment_textures_layout;
 
@@ -134,6 +145,12 @@ public:
 
     vk::RenderPass retrieve_render_pass(vk::Format format, bool force_load, bool force_store, bool is_color_transient, bool no_color = false);
     vk::RenderPass retrieve_mask_render_pass();
+    vk::RenderPass retrieve_msaa_render_pass(vk::Format format, bool force_load);
+    vk::RenderPass retrieve_msaa_unresolve_render_pass(vk::Format format);
+    vk::Pipeline retrieve_msaa_unresolve_pipeline(vk::Format format);
+    vk::PipelineLayout get_msaa_unresolve_pipeline_layout() const {
+        return msaa_unresolve_pipeline_layout;
+    }
     vk::Pipeline retrieve_pipeline(VKContext &context, SceGxmPrimitiveType &type, bool consider_for_async, MemState &mem);
 
     vk::ShaderModule precompile_shader(const Sha256Hash &hash, bool search_first = true);

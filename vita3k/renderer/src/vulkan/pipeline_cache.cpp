@@ -49,6 +49,7 @@ struct CompileRequest {
     // this is everything we need to compile the shader on another thread (as the original data will change)
     SceGxmPrimitiveType type;
     vk::RenderPass render_pass;
+    vk::SampleCountFlagBits samples;
     SceGxmVertexProgram *vertex_program_gxm;
     SceGxmFragmentProgram *fragment_program_gxm;
     shader::Hints hints;
@@ -141,6 +142,23 @@ void PipelineCache::init(bool support_rasterized_order_access) {
             .pBindings = layout_binding.data()
         };
         attachments_layout = state.device.createDescriptorSetLayout(descriptor_info);
+    }
+
+    if (state.msaa_samples != vk::SampleCountFlagBits::e1) {
+        // the single sampled color surface read when filling the multisampled one
+        const vk::DescriptorSetLayoutBinding binding{
+            .binding = 0,
+            .descriptorType = vk::DescriptorType::eSampledImage,
+            .descriptorCount = 1,
+            .stageFlags = vk::ShaderStageFlagBits::eFragment
+        };
+        vk::DescriptorSetLayoutCreateInfo descriptor_info{};
+        descriptor_info.setBindings(binding);
+        msaa_unresolve_layout = state.device.createDescriptorSetLayout(descriptor_info);
+
+        vk::PipelineLayoutCreateInfo layout_info{};
+        layout_info.setSetLayouts(msaa_unresolve_layout);
+        msaa_unresolve_pipeline_layout = state.device.createPipelineLayout(layout_info);
     }
 
     {
@@ -408,6 +426,26 @@ void PipelineCache::cleanup() {
                 render_passes[i][j][k].clear();
             }
 
+    for (auto &passes : msaa_render_passes) {
+        for (auto &[fmt, pass] : passes)
+            state.device.destroy(pass);
+        passes.clear();
+    }
+    for (auto &[fmt, pass] : msaa_unresolve_passes)
+        state.device.destroy(pass);
+    msaa_unresolve_passes.clear();
+    for (auto &[fmt, pipeline] : msaa_unresolve_pipelines)
+        state.device.destroy(pipeline);
+    msaa_unresolve_pipelines.clear();
+    state.device.destroy(msaa_unresolve_pipeline_layout);
+    msaa_unresolve_pipeline_layout = nullptr;
+    state.device.destroy(msaa_unresolve_layout);
+    msaa_unresolve_layout = nullptr;
+    state.device.destroy(msaa_unresolve_vertex_shader);
+    msaa_unresolve_vertex_shader = nullptr;
+    state.device.destroy(msaa_unresolve_fragment_shader);
+    msaa_unresolve_fragment_shader = nullptr;
+
     for (auto &[fmt, pass] : shader_interlock_pass)
         state.device.destroy(pass);
     shader_interlock_pass.clear();
@@ -590,6 +628,83 @@ vk::RenderPass PipelineCache::retrieve_mask_render_pass() {
     return mask_render_pass;
 }
 
+static std::array<vk::SubpassDependency, 5> make_subpass_dependencies(const FeatureState &features, bool no_color) {
+    std::array<vk::SubpassDependency, 5> dependencies;
+
+    // external dependency
+    // we want the previous render pass to be done when we reach the fragment stage / stencil*depth testing
+    dependencies[0] = {
+        .srcSubpass = VK_SUBPASS_EXTERNAL,
+        .dstSubpass = 0,
+        .srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests,
+        .dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests,
+        .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eDepthStencilAttachmentWrite,
+        .dstAccessMask = vk::AccessFlagBits::eColorAttachmentRead | vk::AccessFlagBits::eColorAttachmentWrite
+            | vk::AccessFlagBits::eDepthStencilAttachmentRead | vk::AccessFlagBits::eDepthStencilAttachmentWrite
+    };
+
+    // if an attachment is sampled from, we want it to be done before the next render pass fragment shader
+    dependencies[1] = {
+        .srcSubpass = VK_SUBPASS_EXTERNAL,
+        .dstSubpass = 0,
+        .srcStageMask = vk::PipelineStageFlagBits::eFragmentShader,
+        .dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests,
+        .srcAccessMask = vk::AccessFlagBits::eShaderRead,
+        .dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eDepthStencilAttachmentWrite
+    };
+
+    if (features.support_shader_interlock) {
+        // Interlock writes must precede both attachment access and subsequent interlock draws.
+        dependencies[1].srcAccessMask |= vk::AccessFlagBits::eShaderWrite;
+        if (no_color) {
+            dependencies[0].dstStageMask |= vk::PipelineStageFlagBits::eFragmentShader;
+            dependencies[0].dstAccessMask |= vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite;
+            dependencies[1].dstStageMask |= vk::PipelineStageFlagBits::eFragmentShader;
+            dependencies[1].dstAccessMask |= vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite;
+        } else if (features.use_mask_bit) {
+            dependencies[0].dstStageMask |= vk::PipelineStageFlagBits::eFragmentShader;
+            dependencies[0].dstAccessMask |= vk::AccessFlagBits::eInputAttachmentRead;
+            dependencies[1].dstStageMask |= vk::PipelineStageFlagBits::eFragmentShader;
+            dependencies[1].dstAccessMask |= vk::AccessFlagBits::eInputAttachmentRead;
+        }
+    }
+
+    // The final layout transition covers the entire attachment, not just this macroblock.
+    dependencies[2] = {
+        .srcSubpass = 0,
+        .dstSubpass = VK_SUBPASS_EXTERNAL,
+        .srcStageMask = vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests,
+        .dstStageMask = vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests,
+        .srcAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentWrite,
+        .dstAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentRead | vk::AccessFlagBits::eDepthStencilAttachmentWrite
+    };
+
+    // self-dependency
+    // this allows us to use a pipeline barrier in the render pass for programmable blending
+    dependencies[3] = {
+        .srcSubpass = 0,
+        .dstSubpass = 0,
+        .srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput,
+        .dstStageMask = vk::PipelineStageFlagBits::eFragmentShader,
+        .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite,
+        .dstAccessMask = vk::AccessFlagBits::eInputAttachmentRead,
+        .dependencyFlags = vk::DependencyFlagBits::eByRegion
+    };
+
+    // mid-scene flush
+    // unity games use it to write to a buffer in a vertex shader then use it as the vertex input in the next draw
+    dependencies[4] = {
+        .srcSubpass = 0,
+        .dstSubpass = 0,
+        .srcStageMask = vk::PipelineStageFlagBits::eVertexShader,
+        .dstStageMask = vk::PipelineStageFlagBits::eVertexInput,
+        .srcAccessMask = vk::AccessFlagBits::eShaderWrite,
+        .dstAccessMask = vk::AccessFlagBits::eVertexAttributeRead
+    };
+
+    return dependencies;
+}
+
 vk::RenderPass PipelineCache::retrieve_render_pass(vk::Format format, bool force_load, bool force_store, bool is_color_transient, bool no_color) {
     auto &render_passes_map = no_color ? shader_interlock_pass : render_passes[is_color_transient][force_load][force_store];
 
@@ -643,78 +758,7 @@ vk::RenderPass PipelineCache::retrieve_render_pass(vk::Format format, bool force
         .finalLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal
     };
 
-    std::array<vk::SubpassDependency, 5> dependencies;
-
-    // external dependency
-    // we want the previous render pass to be done when we reach the fragment stage / stencil*depth testing
-    dependencies[0] = {
-        .srcSubpass = VK_SUBPASS_EXTERNAL,
-        .dstSubpass = 0,
-        .srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests,
-        .dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests,
-        .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eDepthStencilAttachmentWrite,
-        .dstAccessMask = vk::AccessFlagBits::eColorAttachmentRead | vk::AccessFlagBits::eColorAttachmentWrite
-            | vk::AccessFlagBits::eDepthStencilAttachmentRead | vk::AccessFlagBits::eDepthStencilAttachmentWrite
-    };
-
-    // if an attachment is sampled from, we want it to be done before the next render pass fragment shader
-    dependencies[1] = {
-        .srcSubpass = VK_SUBPASS_EXTERNAL,
-        .dstSubpass = 0,
-        .srcStageMask = vk::PipelineStageFlagBits::eFragmentShader,
-        .dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests,
-        .srcAccessMask = vk::AccessFlagBits::eShaderRead,
-        .dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eDepthStencilAttachmentWrite
-    };
-
-    if (state.features.support_shader_interlock) {
-        // Interlock writes must precede both attachment access and subsequent interlock draws.
-        dependencies[1].srcAccessMask |= vk::AccessFlagBits::eShaderWrite;
-        if (no_color) {
-            dependencies[0].dstStageMask |= vk::PipelineStageFlagBits::eFragmentShader;
-            dependencies[0].dstAccessMask |= vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite;
-            dependencies[1].dstStageMask |= vk::PipelineStageFlagBits::eFragmentShader;
-            dependencies[1].dstAccessMask |= vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite;
-        } else if (state.features.use_mask_bit) {
-            dependencies[0].dstStageMask |= vk::PipelineStageFlagBits::eFragmentShader;
-            dependencies[0].dstAccessMask |= vk::AccessFlagBits::eInputAttachmentRead;
-            dependencies[1].dstStageMask |= vk::PipelineStageFlagBits::eFragmentShader;
-            dependencies[1].dstAccessMask |= vk::AccessFlagBits::eInputAttachmentRead;
-        }
-    }
-
-    // The final layout transition covers the entire attachment, not just this macroblock.
-    dependencies[2] = {
-        .srcSubpass = 0,
-        .dstSubpass = VK_SUBPASS_EXTERNAL,
-        .srcStageMask = vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests,
-        .dstStageMask = vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests,
-        .srcAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentWrite,
-        .dstAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentRead | vk::AccessFlagBits::eDepthStencilAttachmentWrite
-    };
-
-    // self-dependency
-    // this allows us to use a pipeline barrier in the render pass for programmable blending
-    dependencies[3] = {
-        .srcSubpass = 0,
-        .dstSubpass = 0,
-        .srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput,
-        .dstStageMask = vk::PipelineStageFlagBits::eFragmentShader,
-        .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite,
-        .dstAccessMask = vk::AccessFlagBits::eInputAttachmentRead,
-        .dependencyFlags = vk::DependencyFlagBits::eByRegion
-    };
-
-    // mid-scene flush
-    // unity games use it to write to a buffer in a vertex shader then use it as the vertex input in the next draw
-    dependencies[4] = {
-        .srcSubpass = 0,
-        .dstSubpass = 0,
-        .srcStageMask = vk::PipelineStageFlagBits::eVertexShader,
-        .dstStageMask = vk::PipelineStageFlagBits::eVertexInput,
-        .srcAccessMask = vk::AccessFlagBits::eShaderWrite,
-        .dstAccessMask = vk::AccessFlagBits::eVertexAttributeRead
-    };
+    const auto dependencies = make_subpass_dependencies(state.features, no_color);
 
     vk::RenderPassCreateInfo pass_info{};
     vk::AttachmentDescription attachments[] = { color_attachment, ds_attachment };
@@ -732,6 +776,221 @@ vk::RenderPass PipelineCache::retrieve_render_pass(vk::Format format, bool force
     render_passes_map[format] = state.device.createRenderPass(pass_info);
 
     return render_passes_map[format];
+}
+
+vk::RenderPass PipelineCache::retrieve_msaa_render_pass(vk::Format format, bool force_load) {
+    auto &passes = msaa_render_passes[force_load];
+    auto it = passes.find(format);
+    if (it != passes.end())
+        return it->second;
+
+    const vk::SampleCountFlagBits samples = state.msaa_samples;
+
+    // 0: multisampled color, 1: multisampled depth-stencil, 2: resolved color, 3: resolved depth-stencil
+    // the multisampled attachments are always kept as a scene can be split in multiple render passes
+    const vk::ImageLayout ds_initial_layout = force_load ? vk::ImageLayout::eDepthStencilReadOnlyOptimal : vk::ImageLayout::eUndefined;
+    const vk::AttachmentLoadOp ds_load_op = force_load ? vk::AttachmentLoadOp::eLoad : vk::AttachmentLoadOp::eClear;
+    const std::array<vk::AttachmentDescription2, 4> attachments{ {
+        {
+            .format = format,
+            .samples = samples,
+            .loadOp = vk::AttachmentLoadOp::eLoad,
+            .storeOp = vk::AttachmentStoreOp::eStore,
+            .stencilLoadOp = vk::AttachmentLoadOp::eDontCare,
+            .stencilStoreOp = vk::AttachmentStoreOp::eDontCare,
+            .initialLayout = vk::ImageLayout::eGeneral,
+            .finalLayout = vk::ImageLayout::eGeneral,
+        },
+        {
+            .format = state.deep_stencil_use,
+            .samples = samples,
+            .loadOp = ds_load_op,
+            .storeOp = vk::AttachmentStoreOp::eStore,
+            .stencilLoadOp = ds_load_op,
+            .stencilStoreOp = vk::AttachmentStoreOp::eStore,
+            .initialLayout = ds_initial_layout,
+            .finalLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
+        },
+        {
+            .format = format,
+            .samples = vk::SampleCountFlagBits::e1,
+            .loadOp = vk::AttachmentLoadOp::eDontCare,
+            .storeOp = vk::AttachmentStoreOp::eStore,
+            .stencilLoadOp = vk::AttachmentLoadOp::eDontCare,
+            .stencilStoreOp = vk::AttachmentStoreOp::eDontCare,
+            .initialLayout = vk::ImageLayout::eGeneral,
+            .finalLayout = vk::ImageLayout::eGeneral,
+        },
+        {
+            .format = state.deep_stencil_use,
+            .samples = vk::SampleCountFlagBits::e1,
+            .loadOp = vk::AttachmentLoadOp::eDontCare,
+            .storeOp = vk::AttachmentStoreOp::eStore,
+            .stencilLoadOp = vk::AttachmentLoadOp::eDontCare,
+            .stencilStoreOp = vk::AttachmentStoreOp::eStore,
+            .initialLayout = ds_initial_layout,
+            .finalLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
+        },
+    } };
+
+    const vk::AttachmentReference2 color_ref{ .attachment = 0, .layout = vk::ImageLayout::eGeneral, .aspectMask = vk::ImageAspectFlagBits::eColor };
+    const vk::AttachmentReference2 ds_ref{ .attachment = 1, .layout = vk::ImageLayout::eDepthStencilAttachmentOptimal, .aspectMask = vk::ImageAspectFlagBits::eDepth | vk::ImageAspectFlagBits::eStencil };
+    const vk::AttachmentReference2 color_resolve_ref{ .attachment = 2, .layout = vk::ImageLayout::eGeneral, .aspectMask = vk::ImageAspectFlagBits::eColor };
+    const vk::AttachmentReference2 ds_resolve_ref{ .attachment = 3, .layout = vk::ImageLayout::eDepthStencilAttachmentOptimal, .aspectMask = vk::ImageAspectFlagBits::eDepth | vk::ImageAspectFlagBits::eStencil };
+
+    const vk::SubpassDescriptionDepthStencilResolve ds_resolve{
+        .depthResolveMode = vk::ResolveModeFlagBits::eSampleZero,
+        .stencilResolveMode = vk::ResolveModeFlagBits::eSampleZero,
+        .pDepthStencilResolveAttachment = &ds_resolve_ref
+    };
+    vk::SubpassDescription2 subpass{
+        .pNext = &ds_resolve,
+        .pipelineBindPoint = vk::PipelineBindPoint::eGraphics,
+        .pResolveAttachments = &color_resolve_ref,
+        .pDepthStencilAttachment = &ds_ref
+    };
+    subpass.setColorAttachments(color_ref);
+
+    const auto base_dependencies = make_subpass_dependencies(state.features, false);
+    std::array<vk::SubpassDependency2, 6> dependencies;
+    for (size_t i = 0; i < base_dependencies.size(); i++) {
+        const vk::SubpassDependency &dependency = base_dependencies[i];
+        dependencies[i] = vk::SubpassDependency2{
+            .srcSubpass = dependency.srcSubpass,
+            .dstSubpass = dependency.dstSubpass,
+            .srcStageMask = dependency.srcStageMask,
+            .dstStageMask = dependency.dstStageMask,
+            .srcAccessMask = dependency.srcAccessMask,
+            .dstAccessMask = dependency.dstAccessMask,
+            .dependencyFlags = dependency.dependencyFlags
+        };
+    }
+    // the resolve is done at the end of the subpass, make its result available to whatever uses the single sampled images
+    dependencies[5] = {
+        .srcSubpass = 0,
+        .dstSubpass = VK_SUBPASS_EXTERNAL,
+        .srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests,
+        .dstStageMask = vk::PipelineStageFlagBits::eAllGraphics | vk::PipelineStageFlagBits::eTransfer,
+        .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eDepthStencilAttachmentWrite,
+        .dstAccessMask = vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eTransferRead | vk::AccessFlagBits::eColorAttachmentRead | vk::AccessFlagBits::eColorAttachmentWrite
+            | vk::AccessFlagBits::eDepthStencilAttachmentRead | vk::AccessFlagBits::eDepthStencilAttachmentWrite
+    };
+
+    vk::RenderPassCreateInfo2 pass_info{};
+    pass_info.setAttachments(attachments);
+    pass_info.setSubpasses(subpass);
+    pass_info.setDependencies(dependencies);
+
+    return passes[format] = state.device.createRenderPass2KHR(pass_info);
+}
+
+vk::RenderPass PipelineCache::retrieve_msaa_unresolve_render_pass(vk::Format format) {
+    auto it = msaa_unresolve_passes.find(format);
+    if (it != msaa_unresolve_passes.end())
+        return it->second;
+
+    // the content of the multisampled color is entirely replaced
+    const vk::AttachmentDescription attachment{
+        .format = format,
+        .samples = state.msaa_samples,
+        .loadOp = vk::AttachmentLoadOp::eDontCare,
+        .storeOp = vk::AttachmentStoreOp::eStore,
+        .initialLayout = vk::ImageLayout::eUndefined,
+        .finalLayout = vk::ImageLayout::eGeneral
+    };
+    const vk::AttachmentReference color_ref{ 0, vk::ImageLayout::eGeneral };
+    vk::SubpassDescription subpass{
+        .pipelineBindPoint = vk::PipelineBindPoint::eGraphics
+    };
+    subpass.setColorAttachments(color_ref);
+
+    const std::array<vk::SubpassDependency, 2> dependencies{ { { .srcSubpass = VK_SUBPASS_EXTERNAL,
+                                                                   .dstSubpass = 0,
+                                                                   .srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests | vk::PipelineStageFlagBits::eTransfer | vk::PipelineStageFlagBits::eFragmentShader,
+                                                                   .dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eFragmentShader,
+                                                                   .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eDepthStencilAttachmentWrite | vk::AccessFlagBits::eTransferWrite | vk::AccessFlagBits::eShaderRead,
+                                                                   .dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eShaderRead },
+        { .srcSubpass = 0,
+            .dstSubpass = VK_SUBPASS_EXTERNAL,
+            .srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput,
+            .dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests,
+            .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite,
+            .dstAccessMask = vk::AccessFlagBits::eColorAttachmentRead | vk::AccessFlagBits::eColorAttachmentWrite } } };
+
+    vk::RenderPassCreateInfo pass_info;
+    pass_info.setAttachments(attachment);
+    pass_info.setSubpasses(subpass);
+    pass_info.setDependencies(dependencies);
+    return msaa_unresolve_passes[format] = state.device.createRenderPass(pass_info);
+}
+
+vk::Pipeline PipelineCache::retrieve_msaa_unresolve_pipeline(vk::Format format) {
+    auto it = msaa_unresolve_pipelines.find(format);
+    if (it != msaa_unresolve_pipelines.end())
+        return it->second;
+
+    if (!msaa_unresolve_vertex_shader) {
+        const fs::path shaders_path = state.static_assets / "shaders-builtin/vulkan";
+        msaa_unresolve_vertex_shader = vkutil::load_shader(state.device, shaders_path / "msaa_unresolve.vert.spv");
+        msaa_unresolve_fragment_shader = vkutil::load_shader(state.device, shaders_path / "msaa_unresolve.frag.spv");
+    }
+
+    const std::array<vk::PipelineShaderStageCreateInfo, 2> stages{ {
+        { .stage = vk::ShaderStageFlagBits::eVertex, .module = msaa_unresolve_vertex_shader, .pName = "main" },
+        { .stage = vk::ShaderStageFlagBits::eFragment, .module = msaa_unresolve_fragment_shader, .pName = "main" },
+    } };
+    const vk::PipelineVertexInputStateCreateInfo vertex_input{};
+    const vk::PipelineInputAssemblyStateCreateInfo input_assembly{ .topology = vk::PrimitiveTopology::eTriangleList };
+    const vk::PipelineViewportStateCreateInfo viewport{ .viewportCount = 1, .scissorCount = 1 };
+    const vk::PipelineRasterizationStateCreateInfo rasterizer{
+        .polygonMode = vk::PolygonMode::eFill,
+        .cullMode = vk::CullModeFlagBits::eNone,
+        .frontFace = vk::FrontFace::eCounterClockwise,
+        .lineWidth = 1.0f
+    };
+    const vk::PipelineMultisampleStateCreateInfo multisampling{ .rasterizationSamples = state.msaa_samples };
+    const vk::PipelineColorBlendAttachmentState blend_attachment{
+        .blendEnable = VK_FALSE,
+        .colorWriteMask = vkutil::default_color_mask
+    };
+    vk::PipelineColorBlendStateCreateInfo color_blending{};
+    color_blending.setAttachments(blend_attachment);
+    // use the same dynamic states as the scene pipelines so that binding this one does not invalidate them
+    const std::array dynamic_states = {
+        vk::DynamicState::eViewport,
+        vk::DynamicState::eScissor,
+        vk::DynamicState::eStencilCompareMask,
+        vk::DynamicState::eStencilReference,
+        vk::DynamicState::eStencilWriteMask,
+        vk::DynamicState::eDepthBias,
+        vk::DynamicState::eLineWidth,
+    };
+    vk::PipelineDynamicStateCreateInfo dynamic_info{};
+    dynamic_info.setDynamicStates(dynamic_states);
+    if (!state.physical_device_features.wideLines)
+        dynamic_info.dynamicStateCount--;
+
+    const vk::GraphicsPipelineCreateInfo pipeline_info{
+        .stageCount = static_cast<uint32_t>(stages.size()),
+        .pStages = stages.data(),
+        .pVertexInputState = &vertex_input,
+        .pInputAssemblyState = &input_assembly,
+        .pViewportState = &viewport,
+        .pRasterizationState = &rasterizer,
+        .pMultisampleState = &multisampling,
+        .pColorBlendState = &color_blending,
+        .pDynamicState = &dynamic_info,
+        .layout = msaa_unresolve_pipeline_layout,
+        .renderPass = retrieve_msaa_unresolve_render_pass(format),
+        .subpass = 0
+    };
+
+    const auto result = state.device.createGraphicsPipeline(pipeline_cache, pipeline_info);
+    if (result.result != vk::Result::eSuccess) {
+        LOG_CRITICAL("Failed to create the msaa unresolve pipeline.");
+        return nullptr;
+    }
+    return msaa_unresolve_pipelines[format] = result.value;
 }
 
 vk::PipelineVertexInputStateCreateInfo PipelineCache::get_vertex_input_state(const SceGxmVertexProgram &vertex_program, MemState &mem) {
@@ -861,7 +1120,7 @@ void PipelineCache::compiler_thread(MemState &mem) {
             // use this as an instruction to stop the thread
             break;
 
-        vk::Pipeline pipeline = compile_pipeline(request->type, request->render_pass, *request->vertex_program_gxm, *request->fragment_program_gxm, *request->get_record(), request->hints, mem);
+        vk::Pipeline pipeline = compile_pipeline(request->type, request->render_pass, request->samples, *request->vertex_program_gxm, *request->fragment_program_gxm, *request->get_record(), request->hints, mem);
         *request->pipeline = pipeline;
 
         request->vertex_program_gxm->compile_threads_on.fetch_sub(1, std::memory_order_release);
@@ -885,7 +1144,7 @@ static vk::StencilOpState convert_op_state(const GxmStencilStateOp &state) {
     };
 }
 
-vk::Pipeline PipelineCache::compile_pipeline(SceGxmPrimitiveType type, vk::RenderPass render_pass, const SceGxmVertexProgram &vertex_program_gxm, const SceGxmFragmentProgram &fragment_program_gxm, const GxmRecordState &record, const shader::Hints &hints, MemState &mem) {
+vk::Pipeline PipelineCache::compile_pipeline(SceGxmPrimitiveType type, vk::RenderPass render_pass, vk::SampleCountFlagBits samples, const SceGxmVertexProgram &vertex_program_gxm, const SceGxmFragmentProgram &fragment_program_gxm, const GxmRecordState &record, const shader::Hints &hints, MemState &mem) {
     const VertexProgram &vertex_program = *vertex_program_gxm.renderer_data;
     const SceGxmProgram *gxm_fragment_shader = fragment_program_gxm.program.get(mem);
     const VKFragmentProgram &fragment_program = *reinterpret_cast<VKFragmentProgram *>(
@@ -937,7 +1196,7 @@ vk::Pipeline PipelineCache::compile_pipeline(SceGxmPrimitiveType type, vk::Rende
         .lineWidth = 1.0f
     };
     const vk::PipelineMultisampleStateCreateInfo multisampling{
-        .rasterizationSamples = vk::SampleCountFlagBits::e1
+        .rasterizationSamples = samples
     };
     // depth and stencil tests are always enabled on the ps vita as there is almost no cost in doing so
     // on a tiled renderer
@@ -1040,6 +1299,11 @@ vk::Pipeline PipelineCache::retrieve_pipeline(VKContext &context, SceGxmPrimitiv
     SceGxmVertexProgram &vertex_program_gxm = *record.vertex_program.get(mem);
     key ^= vertex_program_gxm.key_hash;
 
+    // the mask pass is never multisampled
+    const vk::SampleCountFlagBits samples = context.msaa_active && !fragment_program_gxm.is_maskupdate ? state.msaa_samples : vk::SampleCountFlagBits::e1;
+    if (samples != vk::SampleCountFlagBits::e1)
+        key ^= 0x3b9ac9d1f7a64e25ULL;
+
     // and also add the primitive type
     key ^= static_cast<uint64_t>(type);
 
@@ -1083,6 +1347,7 @@ vk::Pipeline PipelineCache::retrieve_pipeline(VKContext &context, SceGxmPrimitiv
             .pipeline = &it->second,
             .type = type,
             .render_pass = render_pass,
+            .samples = samples,
             .vertex_program_gxm = &vertex_program_gxm,
             .fragment_program_gxm = &fragment_program_gxm,
             .hints = context.shader_hints
@@ -1099,7 +1364,7 @@ vk::Pipeline PipelineCache::retrieve_pipeline(VKContext &context, SceGxmPrimitiv
         return nullptr;
     } else {
         // can't wait, compile it right now
-        vk::Pipeline result = compile_pipeline(type, render_pass, vertex_program_gxm, fragment_program_gxm, record, context.shader_hints, mem);
+        vk::Pipeline result = compile_pipeline(type, render_pass, samples, vertex_program_gxm, fragment_program_gxm, record, context.shader_hints, mem);
 
         const auto time_s = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
         next_pipeline_cache_save = time_s + pipeline_cache_save_delay;

@@ -218,10 +218,33 @@ void set_context(VKContext &context, MemState &mem, VKRenderTarget *rt, const Fe
         // also retrieve / create the shader interlock pass
         context.current_shader_interlock_pass = context.state.pipeline_cache.retrieve_render_pass(vk_format, true, true, color_surface_fin == nullptr, true);
 
-    Framebuffer &framebuffer = state.surface_cache.retrieve_framebuffer_handle(mem, color_surface_fin, ds_surface_fin, context.current_render_pass, context.current_shader_interlock_pass, context.current_color_view, context.current_ds_view);
+    // the depth-stencil is not multisampled when read from the memory, same for the gamma view of the shader interlock which cannot be sampled
+    const bool use_msaa = state.msaa_samples != vk::SampleCountFlagBits::e1 && color_surface_fin != nullptr && !force_load
+        && (vk_format == vk::Format::eR8G8B8A8Unorm || vk_format == vk::Format::eR16G16B16A16Sfloat
+            || (vk_format == vk::Format::eR8G8B8A8Srgb && !state.features.support_shader_interlock))
+        && state.pipeline_cache.retrieve_msaa_unresolve_pipeline(vk_format);
+    const vk::RenderPass msaa_render_pass = use_msaa ? state.pipeline_cache.retrieve_msaa_render_pass(vk_format, false) : nullptr;
+    const vk::RenderPass msaa_unresolve_pass = use_msaa ? state.pipeline_cache.retrieve_msaa_unresolve_render_pass(vk_format) : nullptr;
+
+    Framebuffer &framebuffer = state.surface_cache.retrieve_framebuffer_handle(mem, color_surface_fin, ds_surface_fin, context.current_render_pass, context.current_shader_interlock_pass,
+        context.current_color_view, context.current_ds_view, msaa_render_pass, msaa_unresolve_pass, vk_format);
     context.current_framebuffer = framebuffer.standard;
     context.current_shader_interlock_framebuffer = framebuffer.shader_interlock;
     context.current_color_base_image = framebuffer.base_image;
+
+    context.msaa_active = use_msaa && framebuffer.msaa;
+    context.msaa_used = false;
+    context.msaa_unresolve_pending = context.msaa_active;
+    if (context.msaa_active) {
+        context.standard_render_pass = context.current_render_pass;
+        context.standard_framebuffer = framebuffer.standard;
+        context.msaa_unresolve_framebuffer = framebuffer.msaa_unresolve;
+        context.msaa_unresolve_extent = vk::Extent2D{ framebuffer.base_image->width, framebuffer.base_image->height };
+
+        context.current_render_pass = msaa_render_pass;
+        context.initial_render_pass = msaa_render_pass;
+        context.current_framebuffer = framebuffer.msaa;
+    }
 
     // make sure we are not keeping any texture from the previous pass
     // (textures can be still bound even though they are not used)
@@ -356,6 +379,97 @@ static vk::DescriptorSet retrieve_color_descriptor(VKState &state, FrameDescript
     return frame_descriptor.sets[frame_descriptor.descriptors_idx++];
 }
 
+static vk::DescriptorSet retrieve_msaa_descriptor(VKState &state, FrameDescriptor &frame_descriptor) {
+    if (frame_descriptor.descriptors_idx < frame_descriptor.sets.size())
+        return frame_descriptor.sets[frame_descriptor.descriptors_idx++];
+
+    const vk::DescriptorPoolSize pool_size{ vk::DescriptorType::eSampledImage, DESCRIPTOR_PACK_SIZE * MAX_FRAMES_RENDERING };
+    vk::DescriptorPoolCreateInfo descriptor_pool_info{
+        .maxSets = DESCRIPTOR_PACK_SIZE * MAX_FRAMES_RENDERING
+    };
+    descriptor_pool_info.setPoolSizes(pool_size);
+
+    vk::DescriptorPool descriptor_pool = state.device.createDescriptorPool(descriptor_pool_info);
+    state.frame_descriptor_pools.push_back(descriptor_pool);
+
+    std::vector<vk::DescriptorSetLayout> layouts(DESCRIPTOR_PACK_SIZE * MAX_FRAMES_RENDERING, state.pipeline_cache.msaa_unresolve_layout);
+    vk::DescriptorSetAllocateInfo descr_set_info{
+        .descriptorPool = descriptor_pool
+    };
+    descr_set_info.setSetLayouts(layouts);
+    auto descriptor_sets = state.device.allocateDescriptorSets(descr_set_info);
+
+    for (int frame_idx = 0; frame_idx < MAX_FRAMES_RENDERING; frame_idx++) {
+        FrameDescriptor &frame_descr = state.frames[frame_idx].msaa_descriptor;
+        auto descr_it = descriptor_sets.begin() + frame_idx * DESCRIPTOR_PACK_SIZE;
+        frame_descr.sets.insert(frame_descr.sets.end(), descr_it, descr_it + DESCRIPTOR_PACK_SIZE);
+    }
+
+    return frame_descriptor.sets[frame_descriptor.descriptors_idx++];
+}
+
+vk::RenderPass VKContext::retrieve_scene_render_pass(bool force_load, bool force_store) {
+    if (msaa_active)
+        return state.pipeline_cache.retrieve_msaa_render_pass(current_color_format, force_load);
+    return state.pipeline_cache.retrieve_render_pass(current_color_format, force_load, force_store, !record.color_surface.data);
+}
+
+void VKContext::record_msaa_unresolve() {
+    // copy the color of the single sampled surface to all the samples of the multisampled one
+    const vk::DescriptorSet source_set = retrieve_msaa_descriptor(state, state.frame().msaa_descriptor);
+    const vk::DescriptorImageInfo source_info{
+        .imageView = current_color_view,
+        .imageLayout = vk::ImageLayout::eGeneral
+    };
+    vk::WriteDescriptorSet write_descr{
+        .dstSet = source_set,
+        .dstBinding = 0,
+        .descriptorType = vk::DescriptorType::eSampledImage
+    };
+    write_descr.setImageInfo(source_info);
+    state.device.updateDescriptorSets(write_descr, {});
+
+    const vk::Rect2D area{ { 0, 0 }, msaa_unresolve_extent };
+    const vk::RenderPassBeginInfo begin_info{
+        .renderPass = state.pipeline_cache.retrieve_msaa_unresolve_render_pass(current_color_format),
+        .framebuffer = msaa_unresolve_framebuffer,
+        .renderArea = area
+    };
+    render_cmd.beginRenderPass(begin_info, vk::SubpassContents::eInline);
+    render_cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, state.pipeline_cache.retrieve_msaa_unresolve_pipeline(current_color_format));
+    render_cmd.setViewport(0, vk::Viewport{ 0.f, 0.f, static_cast<float>(area.extent.width), static_cast<float>(area.extent.height), 0.f, 1.f });
+    render_cmd.setScissor(0, area);
+    render_cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, state.pipeline_cache.get_msaa_unresolve_pipeline_layout(), 0, source_set, {});
+    render_cmd.draw(3, 1, 0, 0);
+    render_cmd.endRenderPass();
+
+    render_cmd.setViewport(0, viewport);
+    render_cmd.setScissor(0, scissor);
+}
+
+void VKContext::disable_msaa() {
+    if (!msaa_active)
+        return;
+
+    // this resolves the multisampled attachments
+    if (in_renderpass)
+        stop_render_pass();
+
+    msaa_active = false;
+    msaa_unresolve_pending = false;
+    current_framebuffer = standard_framebuffer;
+    if (msaa_used) {
+        // the single sampled attachments now contain the scene
+        current_render_pass = retrieve_scene_render_pass(true, true);
+    } else {
+        current_render_pass = standard_render_pass;
+        initial_render_pass = standard_render_pass;
+    }
+
+    refresh_pipeline = true;
+    current_pipeline = nullptr;
+}
+
 void VKContext::start_render_pass(bool create_descriptor_set, bool maskupdate) {
     if (in_renderpass) {
         LOG_ERROR("Starting render pass while already in render pass");
@@ -371,10 +485,18 @@ void VKContext::start_render_pass(bool create_descriptor_set, bool maskupdate) {
         const uint16_t macroblock_bit = 1U << (last_macroblock_x + 4 * last_macroblock_y);
         is_first_scene_draw = (initialized_macroblocks & macroblock_bit) == 0;
         const bool first_macroblock = initialized_macroblocks == 0;
-        current_render_pass = first_macroblock ? initial_render_pass : state.pipeline_cache.retrieve_render_pass(current_color_format, true, true, !record.color_surface.data);
+        current_render_pass = first_macroblock ? initial_render_pass : retrieve_scene_render_pass(true, true);
         if (is_first_scene_draw && !first_macroblock)
             macroblock_clear = initial_depth_stencil_clear;
         initialized_macroblocks |= macroblock_bit;
+    }
+
+    if (msaa_active && !maskupdate) {
+        if (msaa_unresolve_pending) {
+            record_msaa_unresolve();
+            msaa_unresolve_pending = false;
+        }
+        msaa_used = true;
     }
 
     curr_renderpass_info = vk::RenderPassBeginInfo{
@@ -695,7 +817,7 @@ void VKContext::check_for_macroblock_change(bool is_draw) {
         // TODO: with the feedback loop extension we can do better
         ignore_macroblock = true;
         // in this case we must load and store the depth stencil each time
-        current_render_pass = state.pipeline_cache.retrieve_render_pass(current_color_format, true, true, !record.color_surface.data);
+        current_render_pass = retrieve_scene_render_pass(true, true);
     }
 
     // use the scissor to know in which macroblock we are
@@ -772,6 +894,7 @@ void new_frame(VKContext &context) {
         frame.frag_descriptors[i].descriptors_idx = 0;
     }
     frame.color_descriptor.descriptors_idx = 0;
+    frame.msaa_descriptor.descriptors_idx = 0;
 
     // deferred destruction of the objects
     frame.destroy_queue.destroy_objects();

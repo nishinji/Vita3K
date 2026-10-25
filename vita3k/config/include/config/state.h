@@ -91,6 +91,7 @@ struct Config {
         std::string memory_mapping = "double-buffer";
         bool v_sync = true;
         int anisotropic_filtering = 1;
+        int msaa_samples = 1;
         bool async_pipeline_compilation = true;
         bool import_textures = false;
         bool export_textures = false;

@@ -36,6 +36,7 @@ struct Image {
     uint32_t height;
     vk::Format format;
     ImageLayout layout = ImageLayout::Undefined;
+    vk::SampleCountFlagBits samples = vk::SampleCountFlagBits::e1;
 
     // should the existing image, view, sampler be destroyed when this image is destroyed?
     bool destroy_on_deletion = true;

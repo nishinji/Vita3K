@@ -716,6 +716,23 @@ QGroupBox[flat=&quot;true&quot;]::title {
                      </item>
                     </layout>
                    </item>
+                   <item>
+                    <layout class="QHBoxLayout" name="msaa_layout">
+                     <property name="spacing">
+                      <number>8</number>
+                     </property>
+                     <item>
+                      <widget class="QLabel" name="label_msaa">
+                       <property name="text">
+                        <string>Multisample Anti-Aliasing</string>
+                       </property>
+                      </widget>
+                     </item>
+                     <item>
+                      <widget class="QComboBox" name="msaa_box"/>
+                     </item>
+                    </layout>
+                   </item>
                   </layout>
                  </widget>
                 </item>

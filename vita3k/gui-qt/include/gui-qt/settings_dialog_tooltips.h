@@ -51,6 +51,7 @@ public:
     QString gpu_device;
     QString resolution_upscaling;
     QString anisotropic_filtering;
+    QString msaa;
     QString export_textures;
     QString import_textures;
     QString texture_export_format;

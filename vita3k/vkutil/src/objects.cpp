@@ -53,6 +53,7 @@ Image &Image::operator=(Image &&other) noexcept {
     height = other.height;
     format = other.format;
     layout = std::exchange(other.layout, ImageLayout::Undefined);
+    samples = other.samples;
     destroy_on_deletion = other.destroy_on_deletion;
     return *this;
 }
@@ -98,7 +99,7 @@ void Image::init_image(vk::ImageUsageFlags usage, vk::ComponentMapping mapping, 
             .depth = 1 },
         .mipLevels = 1,
         .arrayLayers = 1,
-        .samples = vk::SampleCountFlagBits::e1,
+        .samples = samples,
         .tiling = vk::ImageTiling::eOptimal,
         .usage = usage,
         .sharingMode = vk::SharingMode::eExclusive,

@@ -165,6 +165,8 @@ void VKSurfaceCache::destroy_framebuffers(vk::ImageView view) {
         if (it->first.first == view || it->first.second == view) {
             destroy_queue.add(it->second.standard);
             destroy_queue.add(it->second.shader_interlock);
+            destroy_queue.add(it->second.msaa);
+            destroy_queue.add(it->second.msaa_unresolve);
             it = framebuffer_array.erase(it);
         } else {
             it = std::next(it);
@@ -190,6 +192,12 @@ void VKSurfaceCache::destroy_surface(ColorSurfaceCacheInfo &info) {
         destroy_queue.add_image(*info.blit_image);
         info.blit_image.reset();
     }
+    if (info.msaa_image) {
+        destroy_queue.add_image(*info.msaa_image);
+        info.msaa_image.reset();
+    }
+    if (info.alternate_view)
+        destroy_framebuffers(info.alternate_view);
     destroy_queue.add(info.alternate_view);
 
     destroy_framebuffers(info.texture.view);
@@ -222,6 +230,8 @@ void VKSurfaceCache::cleanup() {
     for (auto &[key, fb] : framebuffer_array) {
         state.device.destroy(fb.standard);
         state.device.destroy(fb.shader_interlock);
+        state.device.destroy(fb.msaa);
+        state.device.destroy(fb.msaa_unresolve);
     }
     framebuffer_array.clear();
 
@@ -244,6 +254,8 @@ void VKSurfaceCache::cleanup() {
 
         if (info.blit_image)
             info.blit_image->destroy();
+        if (info.msaa_image)
+            info.msaa_image->destroy();
         if (info.copy_buffer)
             info.copy_buffer->destroy();
 
@@ -365,9 +377,9 @@ SurfaceRetrieveResult VKSurfaceCache::retrieve_color_surface_for_framebuffer(Mem
             info.last_frame_rendered = context->frame_timestamp;
 
             if (state.features.support_shader_interlock && vk_format == vk::Format::eR8G8B8A8Srgb) {
-                return { retrieve_surface_gamma_view(state.device, info), &info.texture };
+                return { retrieve_surface_gamma_view(state.device, info), &info.texture, &info };
             } else if (vk_format == info.texture.format) {
-                return { info.texture.view, &info.texture };
+                return { info.texture.view, &info.texture, &info };
             } else {
                 // using both srgb/linear
                 if (!info.alternate_view) {
@@ -381,7 +393,7 @@ SurfaceRetrieveResult VKSurfaceCache::retrieve_color_surface_for_framebuffer(Mem
                     info.alternate_view = state.device.createImageView(view_info);
                 }
 
-                return { info.alternate_view, &info.texture };
+                return { info.alternate_view, &info.texture, &info };
             }
         }
     }
@@ -464,8 +476,24 @@ SurfaceRetrieveResult VKSurfaceCache::retrieve_color_surface_for_framebuffer(Mem
     state.pipeline_cache.can_use_deferred_compilation = false;
 
     if (state.features.support_shader_interlock && vk_format == vk::Format::eR8G8B8A8Srgb)
-        return { retrieve_surface_gamma_view(state.device, info_added), &info_added.texture };
-    return { info_added.texture.view, &info_added.texture };
+        return { retrieve_surface_gamma_view(state.device, info_added), &info_added.texture, &info_added };
+    return { info_added.texture.view, &info_added.texture, &info_added };
+}
+
+vkutil::Image &VKSurfaceCache::retrieve_msaa_color_image(ColorSurfaceCacheInfo &info, vk::Format format) {
+    if (info.msaa_image && (info.msaa_image->format != format || info.msaa_image->width != info.texture.width || info.msaa_image->height != info.texture.height || info.msaa_image->samples != state.msaa_samples)) {
+        // the framebuffers using the previous image are replaced by retrieve_framebuffer_handle
+        state.frame().destroy_queue.add_image(*info.msaa_image);
+        info.msaa_image.reset();
+    }
+
+    if (!info.msaa_image) {
+        info.msaa_image = std::make_unique<vkutil::Image>(info.texture.width, info.texture.height, format);
+        info.msaa_image->samples = state.msaa_samples;
+        info.msaa_image->init_image(vk::ImageUsageFlagBits::eColorAttachment);
+    }
+
+    return *info.msaa_image;
 }
 
 std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_texture(const SceGxmTexture &texture, const SceGxmColorBaseFormat base_format, TextureViewport *texture_viewport) {
@@ -1139,7 +1167,8 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_depth_stencil_as_tex
 
 static Framebuffer empty_framebuffer{};
 Framebuffer &VKSurfaceCache::retrieve_framebuffer_handle(MemState &mem, SceGxmColorSurface *color, SceGxmDepthStencilSurface *depth_stencil,
-    vk::RenderPass standard_render_pass, vk::RenderPass interlock_render_pass, vk::ImageView &color_view, vk::ImageView &ds_view) {
+    vk::RenderPass standard_render_pass, vk::RenderPass interlock_render_pass, vk::ImageView &color_view, vk::ImageView &ds_view,
+    vk::RenderPass msaa_render_pass, vk::RenderPass msaa_unresolve_pass, vk::Format color_format) {
     if (!target) {
         LOG_ERROR("Unable to retrieve framebuffer with no active render target!");
         return empty_framebuffer;
@@ -1175,35 +1204,66 @@ Framebuffer &VKSurfaceCache::retrieve_framebuffer_handle(MemState &mem, SceGxmCo
     std::pair<vk::ImageView, vk::ImageView> key = { color_view, ds_view };
     auto it = framebuffer_array.find(key);
 
-    if (it != framebuffer_array.end()) {
-        // we already created a framebuffer for this pair
-        return it->second;
-    }
-
     // make the framebuffer as big as possible
     const uint32_t framebuffer_width = std::min(color_result.base_image->width, ds_result.base_image->width);
     const uint32_t framebuffer_height = std::min(color_result.base_image->height, ds_result.base_image->height);
 
-    vk::FramebufferCreateInfo fb_info{
-        .renderPass = standard_render_pass,
-        .width = framebuffer_width,
-        .height = framebuffer_height,
-        .layers = 1
-    };
-    vk::ImageView attachments[] = { color_result.view, ds_result.view };
-    fb_info.setAttachments(attachments);
-    vk::Framebuffer fb_standard = state.device.createFramebuffer(fb_info);
+    if (it == framebuffer_array.end()) {
+        vk::FramebufferCreateInfo fb_info{
+            .renderPass = standard_render_pass,
+            .width = framebuffer_width,
+            .height = framebuffer_height,
+            .layers = 1
+        };
+        vk::ImageView attachments[] = { color_result.view, ds_result.view };
+        fb_info.setAttachments(attachments);
+        vk::Framebuffer fb_standard = state.device.createFramebuffer(fb_info);
 
-    vk::Framebuffer fb_interlock = nullptr;
-    if (state.features.support_shader_interlock) {
-        // we also need to create the framebuffer for shader interlock
-        fb_info.renderPass = interlock_render_pass;
-        fb_info.pAttachments = &attachments[1];
-        fb_info.attachmentCount = 1;
-        fb_interlock = state.device.createFramebuffer(fb_info);
+        vk::Framebuffer fb_interlock = nullptr;
+        if (state.features.support_shader_interlock) {
+            // we also need to create the framebuffer for shader interlock
+            fb_info.renderPass = interlock_render_pass;
+            fb_info.pAttachments = &attachments[1];
+            fb_info.attachmentCount = 1;
+            fb_interlock = state.device.createFramebuffer(fb_info);
+        }
+
+        it = framebuffer_array.insert({ key, Framebuffer{ fb_standard, fb_interlock, color_result.base_image } }).first;
     }
 
-    return (framebuffer_array[key] = { fb_standard, fb_interlock, color_result.base_image });
+    Framebuffer &framebuffer = it->second;
+    if (!msaa_render_pass || !color_result.color_info || !target->depthstencil_ms.view)
+        return framebuffer;
+
+    const vkutil::Image &msaa_color = retrieve_msaa_color_image(*color_result.color_info, color_format);
+    if (framebuffer.msaa && (framebuffer.msaa_color_view != msaa_color.view || framebuffer.msaa_depth_view != target->depthstencil_ms.view)) {
+        // one of the multisampled images was re-created or belongs to another render target
+        state.frame().destroy_queue.add(framebuffer.msaa);
+        state.frame().destroy_queue.add(framebuffer.msaa_unresolve);
+    }
+
+    if (!framebuffer.msaa) {
+        const vk::ImageView msaa_attachments[] = { msaa_color.view, target->depthstencil_ms.view, color_result.view, ds_result.view };
+        vk::FramebufferCreateInfo msaa_info{
+            .renderPass = msaa_render_pass,
+            .width = std::min(framebuffer_width, target->depthstencil_ms.width),
+            .height = std::min(framebuffer_height, target->depthstencil_ms.height),
+            .layers = 1
+        };
+        msaa_info.setAttachments(msaa_attachments);
+        framebuffer.msaa = state.device.createFramebuffer(msaa_info);
+
+        msaa_info.renderPass = msaa_unresolve_pass;
+        msaa_info.width = msaa_color.width;
+        msaa_info.height = msaa_color.height;
+        msaa_info.attachmentCount = 1;
+        framebuffer.msaa_unresolve = state.device.createFramebuffer(msaa_info);
+
+        framebuffer.msaa_color_view = msaa_color.view;
+        framebuffer.msaa_depth_view = target->depthstencil_ms.view;
+    }
+
+    return framebuffer;
 }
 
 bool VKSurfaceCache::check_for_surface(MemState &mem, Address source_address, CallbackRequestFunction &callback, Address target_address) {
@@ -1493,6 +1553,19 @@ void VKSurfaceCache::destroy_associated_framebuffers(const VKRenderTarget *rende
 
     destroy_framebuffers(render_target->color.view);
     destroy_framebuffers(render_target->depthstencil.view);
+
+    // the multisampled depth-stencil is only used by the msaa framebuffers
+    if (render_target->depthstencil_ms.view) {
+        vkutil::DestroyQueue &destroy_queue = state.frame().destroy_queue;
+        for (auto &[key, framebuffer] : framebuffer_array) {
+            if (framebuffer.msaa_depth_view == render_target->depthstencil_ms.view) {
+                destroy_queue.add(framebuffer.msaa);
+                destroy_queue.add(framebuffer.msaa_unresolve);
+                framebuffer.msaa_color_view = nullptr;
+                framebuffer.msaa_depth_view = nullptr;
+            }
+        }
+    }
 }
 
 vk::ImageView VKSurfaceCache::sourcing_color_surface_for_presentation(Ptr<const void> address, uint32_t pitch, Viewport &viewport) {
