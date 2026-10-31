@@ -165,6 +165,31 @@ static const GLint *translate_swizzle(SceGxmTextureSwizzle4Mode mode) {
     return swizzle_abgr;
 }
 
+// U4U4U4U4 is uploaded as GL_UNSIGNED_SHORT_4_4_4_4 (red read from bits 12-15) and GXM names
+// its fields from the most significant bit, so U4U4U4U4_RGBA needs no swizzle.
+static const GLint *translate_swizzle_4444(SceGxmTextureSwizzle4Mode mode) {
+    switch (mode) {
+    case SCE_GXM_TEXTURE_SWIZZLE4_ABGR:
+        return swizzle_rgba;
+    case SCE_GXM_TEXTURE_SWIZZLE4_ARGB:
+        return swizzle_bgra;
+    case SCE_GXM_TEXTURE_SWIZZLE4_RGBA:
+        return swizzle_abgr;
+    case SCE_GXM_TEXTURE_SWIZZLE4_BGRA:
+        return swizzle_argb;
+    case SCE_GXM_TEXTURE_SWIZZLE4_1BGR:
+        return swizzle_1gba;
+    case SCE_GXM_TEXTURE_SWIZZLE4_1RGB:
+        return swizzle_1abg;
+    case SCE_GXM_TEXTURE_SWIZZLE4_RGB1:
+        return swizzle_1bgr;
+    case SCE_GXM_TEXTURE_SWIZZLE4_BGR1:
+        return swizzle_1rgb;
+    }
+
+    return swizzle_rgba;
+}
+
 // U1U5U5U5 is uploaded as GL_UNSIGNED_SHORT_5_5_5_1 (red read from bits 11-15, alpha from bit 0).
 // GXM names the fields from the most significant bit: U5U5U5U1_RGBA is R5G5B5A1 and
 // U5U5U5U1_BGRA is B5G5R5A1. The variants keeping their 1-bit field in bit 15 (ABGR, ARGB,
@@ -611,8 +636,10 @@ const GLint *translate_swizzle(SceGxmTextureFormat fmt) {
     case SCE_GXM_TEXTURE_BASE_FORMAT_U1U5U5U5:
         return translate_swizzle_1555(static_cast<SceGxmTextureSwizzle4Mode>(swizzle));
 
-    // 4 components.
     case SCE_GXM_TEXTURE_BASE_FORMAT_U4U4U4U4:
+        return translate_swizzle_4444(static_cast<SceGxmTextureSwizzle4Mode>(swizzle));
+
+    // 4 components.
     case SCE_GXM_TEXTURE_BASE_FORMAT_U8U3U3U2:
     case SCE_GXM_TEXTURE_BASE_FORMAT_U8U8U8U8:
     case SCE_GXM_TEXTURE_BASE_FORMAT_S8S8S8S8:
