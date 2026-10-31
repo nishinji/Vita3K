@@ -276,7 +276,7 @@ SharedGLObject compile_program(GLState &renderer, GLContext &context, const GxmR
     }
 
     const SharedGLObject vertex_shader = get_or_compile_shader(vertex_program_gxm.program.get(mem), features, vertex_program.hash, renderer.vertex_shader_cache,
-        GL_VERTEX_SHADER, context.shader_hints, shader_cache, spirv, maskupdate, renderer.shaders_path, renderer.shaders_log_path, renderer.shader_version, renderer.shaders_count_compiled);
+        GL_VERTEX_SHADER, context.shader_hints, shader_cache, spirv, false, renderer.shaders_path, renderer.shaders_log_path, renderer.shader_version, renderer.shaders_count_compiled);
 
     if (!vertex_shader) {
         LOG_CRITICAL("Error in get/compiled vertex shader:\n{}", hex_string(vertex_program.hash));
