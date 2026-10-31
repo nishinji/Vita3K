@@ -704,9 +704,10 @@ void GLState::render_frame(DisplayState &display, const GxmState &gxm, MemState 
         const std::size_t texture_data_size = static_cast<size_t>(display_frame.pitch) * static_cast<size_t>(display_frame.image_size.y) * sizeof(uint32_t);
 
         SceFVector2 texture_size;
+        SceGxmColorFormat surface_format;
 
         uint64_t surface_handle = surface_cache.sourcing_color_surface_for_presentation(
-            display_frame.base, display_frame.image_size.x, display_frame.image_size.y, display_frame.pitch, uvs, this->res_multiplier, texture_size);
+            display_frame.base, display_frame.image_size.x, display_frame.image_size.y, display_frame.pitch, uvs, this->res_multiplier, texture_size, surface_format);
 
         GLint last_texture = 0;
         glGetIntegerv(GL_TEXTURE_BINDING_2D, &last_texture);
@@ -730,15 +731,24 @@ void GLState::render_frame(DisplayState &display, const GxmState &gxm, MemState 
 
             surface_handle = screen_renderer.get_resident_texture();
         } else {
-            const GLint standard_swizzle[4] = { GL_RED, GL_GREEN, GL_BLUE, GL_ALPHA };
+            // read the surface back in the A8B8G8R8 order of the display, as when it is sampled as a texture
+            const GLint *surface_swizzle = color::translate_swizzle(surface_format);
+            GLint display_swizzle[4];
+            for (int i = 0; i < 4; i++) {
+                display_swizzle[i] = GL_ZERO;
+                for (int j = 0; j < 4; j++) {
+                    if (surface_swizzle[j] == GL_RED + i)
+                        display_swizzle[i] = GL_RED + j;
+                }
+            }
 
             glBindTexture(GL_TEXTURE_2D, surface_handle);
 #ifdef __ANDROID__
             for (int i = 0; i < 4; i++) {
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R + i, standard_swizzle[i]);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R + i, display_swizzle[i]);
             }
 #else
-            glTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_RGBA, standard_swizzle);
+            glTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_RGBA, display_swizzle);
 #endif
         }
 

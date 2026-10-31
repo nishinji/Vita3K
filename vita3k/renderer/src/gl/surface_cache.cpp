@@ -739,7 +739,7 @@ GLuint GLSurfaceCache::retrieve_framebuffer_handle(const State &state, const Mem
     return fb[0];
 }
 
-GLuint GLSurfaceCache::sourcing_color_surface_for_presentation(Ptr<const void> address, uint32_t width, uint32_t height, const std::uint32_t pitch, float *uvs, const float res_multiplier, SceFVector2 &texture_size) {
+GLuint GLSurfaceCache::sourcing_color_surface_for_presentation(Ptr<const void> address, uint32_t width, uint32_t height, const std::uint32_t pitch, float *uvs, const float res_multiplier, SceFVector2 &texture_size, SceGxmColorFormat &color_format) {
     auto ite = color_surface_textures.lower_bound(address.address());
     if (ite == color_surface_textures.end()) {
         return 0;
@@ -776,6 +776,7 @@ GLuint GLSurfaceCache::sourcing_color_surface_for_presentation(Ptr<const void> a
 
             texture_size.x = info.width;
             texture_size.y = info.height;
+            color_format = static_cast<SceGxmColorFormat>(info.format | info.swizzle);
 
             return info.gl_texture[0];
         }
