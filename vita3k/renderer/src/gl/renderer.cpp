@@ -40,8 +40,10 @@
 #include <Windows.h>
 #endif
 
+#include <algorithm>
 #include <array>
 #include <cstring>
+#include <limits>
 #include <mutex>
 #include <string_view>
 
@@ -263,6 +265,31 @@ bool GLState::init() {
 
 void GLState::late_init(const Config &cfg, const std::string_view game_id, MemState &mem) {
     texture_cache.init(cfg.hashless_texture_cache, texture_folder(), game_id);
+
+    // the color formats we support with multisampling and the depth-stencil must support the same number of samples
+    msaa_max_samples = 0;
+    if (glGetInternalformativ && glRenderbufferStorageMultisample && glBlitFramebuffer) {
+        GLint max_samples = std::numeric_limits<GLint>::max();
+        for (const GLenum format : { GL_RGBA8, GL_RGBA16F, GL_DEPTH24_STENCIL8 }) {
+            GLint format_samples = 0;
+            glGetInternalformativ(GL_RENDERBUFFER, format, GL_SAMPLES, 1, &format_samples);
+            max_samples = std::min(max_samples, format_samples);
+        }
+        msaa_max_samples = std::max(max_samples, 0);
+    }
+
+    msaa_samples = 0;
+    const int requested_samples = cfg.current_config.msaa_samples;
+    if (requested_samples > 1) {
+        if (msaa_max_samples < 2) {
+            LOG_WARN("MSAA is not supported by this GPU, disabling it");
+        } else {
+            msaa_samples = std::min<GLsizei>(requested_samples, msaa_max_samples);
+            if (msaa_samples != requested_samples)
+                LOG_WARN("{}x MSAA is not supported by this GPU, using {}x instead", requested_samples, msaa_samples);
+            LOG_INFO("Using {}x MSAA", msaa_samples);
+        }
+    }
 }
 
 bool create(std::unique_ptr<Context> &context) {
@@ -352,8 +379,54 @@ bool create(std::unique_ptr<VertexProgram> &vp, GLState &state, const SceGxmProg
     return true;
 }
 
+static void blit_framebuffer(GLuint source, GLuint destination, GLsizei width, GLsizei height) {
+    // the blit is limited by the scissor test
+    const GLboolean scissor_test = glIsEnabled(GL_SCISSOR_TEST);
+    glDisable(GL_SCISSOR_TEST);
+
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, source);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, destination);
+    glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);
+
+    if (scissor_test)
+        glEnable(GL_SCISSOR_TEST);
+}
+
+void resolve_msaa(GLContext &context) {
+    if (!context.msaa_framebuffer || !context.msaa_dirty)
+        return;
+
+    context.msaa_dirty = false;
+    blit_framebuffer(context.msaa_framebuffer, context.standard_framebuffer, context.msaa_width, context.msaa_height);
+    glBindFramebuffer(GL_FRAMEBUFFER, context.current_framebuffer);
+}
+
+void disable_msaa(GLContext &context) {
+    if (!context.msaa_framebuffer)
+        return;
+
+    resolve_msaa(context);
+    context.msaa_framebuffer = 0;
+    context.current_framebuffer = context.standard_framebuffer;
+    glBindFramebuffer(GL_FRAMEBUFFER, context.current_framebuffer);
+}
+
+static void get_texture_size(GLuint texture, GLint &width, GLint &height) {
+    GLint last_texture = 0;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &last_texture);
+
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &width);
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &height);
+
+    glBindTexture(GL_TEXTURE_2D, last_texture);
+}
+
 void set_context(GLState &state, GLContext &context, const MemState &mem, const GLRenderTarget *rt, const FeatureState &features) {
     R_PROFILE(__func__);
+
+    // the previous scene might still be multisampled
+    disable_msaa(context);
 
     bind_fundamental(context);
 
@@ -376,13 +449,47 @@ void set_context(GLState &state, GLContext &context, const MemState &mem, const 
     }
 
     GLuint current_color_attachment_handle = 0;
+    GLuint current_ds_attachment_handle = 0;
     std::uint16_t current_framebuffer_height = 0;
 
     context.current_framebuffer = state.surface_cache.retrieve_framebuffer_handle(
-        state, mem, color_surface_fin, ds_surface_fin, &current_color_attachment_handle, nullptr, &current_framebuffer_height);
+        state, mem, color_surface_fin, ds_surface_fin, &current_color_attachment_handle, &current_ds_attachment_handle, &current_framebuffer_height);
     context.current_color_attachment = current_color_attachment_handle;
     context.current_framebuffer_height = current_framebuffer_height;
     context.self_sampling_indices.clear();
+    context.standard_framebuffer = context.current_framebuffer;
+
+    // use the sample count forced by the user, or the one asked by the game if the result is downscaled to the surface
+    GLsizei msaa_samples = state.msaa_samples;
+    if (context.render_target && context.render_target->multisample_mode != SCE_GXM_MULTISAMPLE_NONE && context.record.color_surface.downscale && state.msaa_max_samples >= 2)
+        msaa_samples = std::max(msaa_samples, std::min<GLsizei>(context.render_target->multisample_mode == SCE_GXM_MULTISAMPLE_4X ? 4 : 2, state.msaa_max_samples));
+
+    if (msaa_samples && color_surface_fin && context.current_framebuffer) {
+        // the color is the only part which is not stored the same way as in a single sampled framebuffer
+        const SceGxmColorBaseFormat base_format = gxm::get_base_format(color_surface_fin->colorFormat);
+        const bool is_raw = state.features.preserve_f16_nan_as_u16 && color::is_write_surface_stored_rawly(base_format);
+        if (!is_raw && (base_format == SCE_GXM_COLOR_BASE_FORMAT_U8U8U8U8 || base_format == SCE_GXM_COLOR_BASE_FORMAT_F16F16F16F16)) {
+            GLint color_width = 0, color_height = 0, ds_width = 0, ds_height = 0;
+            get_texture_size(current_color_attachment_handle, color_width, color_height);
+            get_texture_size(current_ds_attachment_handle, ds_width, ds_height);
+            const GLsizei width = std::min(color_width, ds_width);
+            const GLsizei height = std::min(color_height, ds_height);
+
+            const GLuint msaa_framebuffer = width > 0 && height > 0
+                ? state.surface_cache.retrieve_msaa_framebuffer(current_color_attachment_handle, current_ds_attachment_handle, color::translate_internal_format(base_format), msaa_samples, width, height)
+                : 0;
+            if (msaa_framebuffer) {
+                // fill all the samples with the content of the surface
+                blit_framebuffer(context.standard_framebuffer, msaa_framebuffer, width, height);
+
+                context.msaa_framebuffer = msaa_framebuffer;
+                context.msaa_width = width;
+                context.msaa_height = height;
+                context.msaa_dirty = false;
+                context.current_framebuffer = msaa_framebuffer;
+            }
+        }
+    }
 
     glBindFramebuffer(GL_FRAMEBUFFER, context.current_framebuffer);
 

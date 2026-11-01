@@ -480,8 +480,8 @@ SurfaceRetrieveResult VKSurfaceCache::retrieve_color_surface_for_framebuffer(Mem
     return { info_added.texture.view, &info_added.texture, &info_added };
 }
 
-vkutil::Image &VKSurfaceCache::retrieve_msaa_color_image(ColorSurfaceCacheInfo &info, vk::Format format) {
-    if (info.msaa_image && (info.msaa_image->format != format || info.msaa_image->width != info.texture.width || info.msaa_image->height != info.texture.height || info.msaa_image->samples != state.msaa_samples)) {
+vkutil::Image &VKSurfaceCache::retrieve_msaa_color_image(ColorSurfaceCacheInfo &info, vk::Format format, vk::SampleCountFlagBits samples) {
+    if (info.msaa_image && (info.msaa_image->format != format || info.msaa_image->width != info.texture.width || info.msaa_image->height != info.texture.height || info.msaa_image->samples != samples)) {
         // the framebuffers using the previous image are replaced by retrieve_framebuffer_handle
         state.frame().destroy_queue.add_image(*info.msaa_image);
         info.msaa_image.reset();
@@ -489,11 +489,22 @@ vkutil::Image &VKSurfaceCache::retrieve_msaa_color_image(ColorSurfaceCacheInfo &
 
     if (!info.msaa_image) {
         info.msaa_image = std::make_unique<vkutil::Image>(info.texture.width, info.texture.height, format);
-        info.msaa_image->samples = state.msaa_samples;
+        info.msaa_image->samples = samples;
         info.msaa_image->init_image(vk::ImageUsageFlagBits::eColorAttachment);
     }
 
     return *info.msaa_image;
+}
+
+vkutil::Image &VKSurfaceCache::retrieve_msaa_depth_image(VKRenderTarget &render_target, vk::SampleCountFlagBits samples) {
+    vkutil::Image &image = render_target.depthstencil_ms[msaa_sample_index(samples)];
+    if (!image.image) {
+        image = vkutil::Image(render_target.depthstencil.width, render_target.depthstencil.height, state.deep_stencil_use);
+        image.samples = samples;
+        image.init_image(vk::ImageUsageFlagBits::eDepthStencilAttachment);
+    }
+
+    return image;
 }
 
 std::optional<TextureLookupResult> VKSurfaceCache::retrieve_color_surface_as_texture(const SceGxmTexture &texture, const SceGxmColorBaseFormat base_format, TextureViewport *texture_viewport) {
@@ -1168,7 +1179,7 @@ std::optional<TextureLookupResult> VKSurfaceCache::retrieve_depth_stencil_as_tex
 static Framebuffer empty_framebuffer{};
 Framebuffer &VKSurfaceCache::retrieve_framebuffer_handle(MemState &mem, SceGxmColorSurface *color, SceGxmDepthStencilSurface *depth_stencil,
     vk::RenderPass standard_render_pass, vk::RenderPass interlock_render_pass, vk::ImageView &color_view, vk::ImageView &ds_view,
-    vk::RenderPass msaa_render_pass, vk::RenderPass msaa_unresolve_pass, vk::Format color_format) {
+    vk::RenderPass msaa_render_pass, vk::RenderPass msaa_unresolve_pass, vk::Format color_format, vk::SampleCountFlagBits msaa_samples) {
     if (!target) {
         LOG_ERROR("Unable to retrieve framebuffer with no active render target!");
         return empty_framebuffer;
@@ -1232,22 +1243,23 @@ Framebuffer &VKSurfaceCache::retrieve_framebuffer_handle(MemState &mem, SceGxmCo
     }
 
     Framebuffer &framebuffer = it->second;
-    if (!msaa_render_pass || !color_result.color_info || !target->depthstencil_ms.view)
+    if (!msaa_render_pass || !color_result.color_info)
         return framebuffer;
 
-    const vkutil::Image &msaa_color = retrieve_msaa_color_image(*color_result.color_info, color_format);
-    if (framebuffer.msaa && (framebuffer.msaa_color_view != msaa_color.view || framebuffer.msaa_depth_view != target->depthstencil_ms.view)) {
+    const vkutil::Image &msaa_color = retrieve_msaa_color_image(*color_result.color_info, color_format, msaa_samples);
+    const vkutil::Image &msaa_depth = retrieve_msaa_depth_image(*target, msaa_samples);
+    if (framebuffer.msaa && (framebuffer.msaa_color_view != msaa_color.view || framebuffer.msaa_depth_view != msaa_depth.view)) {
         // one of the multisampled images was re-created or belongs to another render target
         state.frame().destroy_queue.add(framebuffer.msaa);
         state.frame().destroy_queue.add(framebuffer.msaa_unresolve);
     }
 
     if (!framebuffer.msaa) {
-        const vk::ImageView msaa_attachments[] = { msaa_color.view, target->depthstencil_ms.view, color_result.view, ds_result.view };
+        const vk::ImageView msaa_attachments[] = { msaa_color.view, msaa_depth.view, color_result.view, ds_result.view };
         vk::FramebufferCreateInfo msaa_info{
             .renderPass = msaa_render_pass,
-            .width = std::min(framebuffer_width, target->depthstencil_ms.width),
-            .height = std::min(framebuffer_height, target->depthstencil_ms.height),
+            .width = std::min(framebuffer_width, msaa_depth.width),
+            .height = std::min(framebuffer_height, msaa_depth.height),
             .layers = 1
         };
         msaa_info.setAttachments(msaa_attachments);
@@ -1260,7 +1272,7 @@ Framebuffer &VKSurfaceCache::retrieve_framebuffer_handle(MemState &mem, SceGxmCo
         framebuffer.msaa_unresolve = state.device.createFramebuffer(msaa_info);
 
         framebuffer.msaa_color_view = msaa_color.view;
-        framebuffer.msaa_depth_view = target->depthstencil_ms.view;
+        framebuffer.msaa_depth_view = msaa_depth.view;
     }
 
     return framebuffer;
@@ -1555,10 +1567,13 @@ void VKSurfaceCache::destroy_associated_framebuffers(const VKRenderTarget *rende
     destroy_framebuffers(render_target->depthstencil.view);
 
     // the multisampled depth-stencil is only used by the msaa framebuffers
-    if (render_target->depthstencil_ms.view) {
-        vkutil::DestroyQueue &destroy_queue = state.frame().destroy_queue;
+    vkutil::DestroyQueue &destroy_queue = state.frame().destroy_queue;
+    for (const vkutil::Image &depthstencil_ms : render_target->depthstencil_ms) {
+        if (!depthstencil_ms.view)
+            continue;
+
         for (auto &[key, framebuffer] : framebuffer_array) {
-            if (framebuffer.msaa_depth_view == render_target->depthstencil_ms.view) {
+            if (framebuffer.msaa_depth_view == depthstencil_ms.view) {
                 destroy_queue.add(framebuffer.msaa);
                 destroy_queue.add(framebuffer.msaa_unresolve);
                 framebuffer.msaa_color_view = nullptr;

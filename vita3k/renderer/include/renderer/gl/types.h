@@ -81,6 +81,15 @@ struct GLContext : public renderer::Context {
     GLuint current_color_attachment{ 0 };
     GLuint current_framebuffer_height{ 0 };
 
+    // single sampled framebuffer of the current scene, the multisampled one is resolved into it
+    GLuint standard_framebuffer{ 0 };
+    // multisampled framebuffer the scene is rendered to, 0 if it is single sampled
+    GLuint msaa_framebuffer{ 0 };
+    GLsizei msaa_width{ 0 };
+    GLsizei msaa_height{ 0 };
+    // was the multisampled framebuffer drawn to since the last resolve
+    bool msaa_dirty{ false };
+
     std::pair<std::uint8_t *, std::size_t> vertex_uniform_buffer_storage_ptr{ nullptr, 0 };
     std::pair<std::uint8_t *, std::size_t> fragment_uniform_buffer_storage_ptr{ nullptr, 0 };
 

@@ -134,6 +134,11 @@ COMMAND(handle_sync_surface_data) {
         // do it as soon as possible
         signal_notifications();
 
+    if (renderer.current_backend == Backend::OpenGL) {
+        // the scene is over, what follows reads the surfaces
+        gl::disable_msaa(*reinterpret_cast<gl::GLContext *>(render_context));
+    }
+
     if (renderer.current_backend == Backend::Vulkan) {
         vulkan::VKContext *context = reinterpret_cast<vulkan::VKContext *>(render_context);
         if (context->is_recording)

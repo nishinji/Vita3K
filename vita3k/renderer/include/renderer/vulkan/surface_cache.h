@@ -206,7 +206,9 @@ private:
     void destroy_surface(DepthStencilSurfaceCacheInfo &info);
 
     // retrieve the multisampled image used with the given color surface, (re-)creating it if necessary
-    vkutil::Image &retrieve_msaa_color_image(ColorSurfaceCacheInfo &info, vk::Format format);
+    vkutil::Image &retrieve_msaa_color_image(ColorSurfaceCacheInfo &info, vk::Format format, vk::SampleCountFlagBits samples);
+    // same for the multisampled depth-stencil of a render target
+    vkutil::Image &retrieve_msaa_depth_image(VKRenderTarget &render_target, vk::SampleCountFlagBits samples);
 
 public:
     // when creating a mutable image, can we pass as an argument
@@ -231,7 +233,8 @@ public:
     // (framebuffer.msaa stays null if it is not possible)
     Framebuffer &retrieve_framebuffer_handle(MemState &mem, SceGxmColorSurface *color, SceGxmDepthStencilSurface *depth_stencil,
         vk::RenderPass standard_render_pass, vk::RenderPass interlock_render_pass, vk::ImageView &color_view, vk::ImageView &ds_view,
-        vk::RenderPass msaa_render_pass = nullptr, vk::RenderPass msaa_unresolve_pass = nullptr, vk::Format color_format = vk::Format::eUndefined);
+        vk::RenderPass msaa_render_pass = nullptr, vk::RenderPass msaa_unresolve_pass = nullptr, vk::Format color_format = vk::Format::eUndefined,
+        vk::SampleCountFlagBits msaa_samples = vk::SampleCountFlagBits::e1);
 
     // Check if the address is one of a used surface
     // If it is the case, this function returns true, moves the callback

@@ -49,6 +49,12 @@ struct VKState;
 struct VKContext;
 struct CompileRequest;
 
+// index of the sample count (2, 4 or 8) in the arrays containing one item for each
+constexpr uint32_t msaa_sample_index(vk::SampleCountFlagBits samples) {
+    return static_cast<uint32_t>(samples) == 2 ? 0 : static_cast<uint32_t>(samples) == 4 ? 1
+                                                                                         : 2;
+}
+
 using PipelineCompileQueue = moodycamel::BlockingConcurrentQueue<CompileRequest *>;
 
 class PipelineCache {
@@ -87,11 +93,12 @@ private:
     vk::RenderPass mask_render_pass;
     vk::ShaderModule mask_test_shader;
 
-    // multisampled render passes which resolve into the single sample attachments, the index is 1 if the depth-stencil is loaded
-    std::map<vk::Format, vk::RenderPass> msaa_render_passes[2];
+    // multisampled render passes which resolve into the single sample attachments
+    // first index: sample count (see msaa_sample_index), second index: 1 if the depth-stencil is loaded
+    std::map<vk::Format, vk::RenderPass> msaa_render_passes[3][2];
     // used to fill the multisampled color attachment with the content of the single sample one
-    std::map<vk::Format, vk::RenderPass> msaa_unresolve_passes;
-    std::map<vk::Format, vk::Pipeline> msaa_unresolve_pipelines;
+    std::map<std::pair<vk::Format, vk::SampleCountFlagBits>, vk::RenderPass> msaa_unresolve_passes;
+    std::map<std::pair<vk::Format, vk::SampleCountFlagBits>, vk::Pipeline> msaa_unresolve_pipelines;
     vk::PipelineLayout msaa_unresolve_pipeline_layout;
     vk::ShaderModule msaa_unresolve_vertex_shader;
     vk::ShaderModule msaa_unresolve_fragment_shader;
@@ -145,9 +152,9 @@ public:
 
     vk::RenderPass retrieve_render_pass(vk::Format format, bool force_load, bool force_store, bool is_color_transient, bool no_color = false);
     vk::RenderPass retrieve_mask_render_pass();
-    vk::RenderPass retrieve_msaa_render_pass(vk::Format format, bool force_load);
-    vk::RenderPass retrieve_msaa_unresolve_render_pass(vk::Format format);
-    vk::Pipeline retrieve_msaa_unresolve_pipeline(vk::Format format);
+    vk::RenderPass retrieve_msaa_render_pass(vk::Format format, vk::SampleCountFlagBits samples, bool force_load);
+    vk::RenderPass retrieve_msaa_unresolve_render_pass(vk::Format format, vk::SampleCountFlagBits samples);
+    vk::Pipeline retrieve_msaa_unresolve_pipeline(vk::Format format, vk::SampleCountFlagBits samples);
     vk::PipelineLayout get_msaa_unresolve_pipeline_layout() const {
         return msaa_unresolve_pipeline_layout;
     }

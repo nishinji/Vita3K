@@ -23,7 +23,9 @@
 #include <renderer/gxm_types.h>
 
 #include <array>
+#include <map>
 #include <memory>
+#include <tuple>
 #include <unordered_map>
 #include <vector>
 
@@ -82,6 +84,16 @@ struct GLColorSurfaceCacheInfo : public GLSurfaceCacheInfo {
     std::vector<std::unique_ptr<GLCastedTexture>> casted_textures;
 };
 
+// multisampled framebuffer used to render a scene, it is resolved to the single sampled framebuffer of the same surfaces
+struct GLMsaaFramebuffer {
+    GLObjectArray<1> framebuffer;
+    GLObjectArray<1> color;
+    GLObjectArray<1> depth_stencil;
+    GLsizei width = 0;
+    GLsizei height = 0;
+    GLenum color_format = 0;
+};
+
 struct GLDepthStencilSurfaceCacheInfo : public GLSurfaceCacheInfo {
     SceGxmDepthStencilSurface surface;
     GLObjectArray<1> gl_texture;
@@ -96,6 +108,8 @@ private:
     std::map<std::uint64_t, std::unique_ptr<GLColorSurfaceCacheInfo>, std::greater<std::uint64_t>> color_surface_textures;
     std::array<GLDepthStencilSurfaceCacheInfo, MAX_CACHE_SIZE_PER_CONTAINER> depth_stencil_textures;
     std::unordered_map<std::uint64_t, GLObjectArray<1>> framebuffer_array;
+    // the key is the color texture, the depth-stencil texture and the number of samples
+    std::map<std::tuple<GLuint, GLuint, GLsizei>, GLMsaaFramebuffer> msaa_framebuffers;
 
     std::vector<size_t> last_use_color_surface_index;
     std::vector<size_t> last_use_depth_stencil_surface_index;
@@ -126,6 +140,9 @@ public:
     GLuint retrieve_framebuffer_handle(const State &state, const MemState &mem, SceGxmColorSurface *color, SceGxmDepthStencilSurface *depth_stencil,
         GLuint *color_texture_handle = nullptr, GLuint *ds_texture_handle = nullptr,
         std::uint16_t *stored_height = nullptr);
+
+    // Returns the multisampled framebuffer matching the color and depth-stencil textures, or 0 if it can't be created
+    GLuint retrieve_msaa_framebuffer(GLuint color_texture, GLuint ds_texture, GLenum color_format, GLsizei samples, GLsizei width, GLsizei height);
 
     void set_render_target(const GLRenderTarget *new_target) {
         target = new_target;

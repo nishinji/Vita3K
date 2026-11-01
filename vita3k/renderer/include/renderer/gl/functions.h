@@ -44,6 +44,10 @@ bool create(GLState &state, std::unique_ptr<RenderTarget> &rt, const SceGxmRende
 bool create(std::unique_ptr<FragmentProgram> &fp, GLState &state, const SceGxmProgram &program, const SceGxmBlendInfo *blend);
 bool create(std::unique_ptr<VertexProgram> &vp, GLState &state, const SceGxmProgram &program);
 void set_context(GLState &state, GLContext &ctx, const MemState &mem, const GLRenderTarget *rt, const FeatureState &features);
+// Copy the multisampled framebuffer of the scene (if any) to its single sampled framebuffer
+void resolve_msaa(GLContext &context);
+// Resolve the multisampled framebuffer then go on with the single sampled one
+void disable_msaa(GLContext &context);
 void queue_surface_data(GLState &renderer, GLContext &context, MemState &mem, SceGxmColorSurface &surface, const SceGxmNotification &vertex_notification, const SceGxmNotification &fragment_notification);
 void lookup_and_get_surface_data(GLState &renderer, MemState &mem, SceGxmColorSurface &surface);
 void draw(GLState &renderer, GLContext &context, const FeatureState &features, SceGxmPrimitiveType type, SceGxmIndexFormat format,

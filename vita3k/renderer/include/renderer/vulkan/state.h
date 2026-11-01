@@ -119,7 +119,9 @@ struct VKState : public renderer::State {
     bool support_properties2 = false;
     // can the depth-stencil of a multisampled render pass be resolved in the render pass
     bool support_depth_stencil_resolve = false;
-    // sample count of the multisampled render passes, 1 if msaa is disabled
+    // sample counts usable by the multisampled render passes (none if multisampling is not supported)
+    vk::SampleCountFlags msaa_supported;
+    // sample count forced by the user for all the scenes, 1 if msaa is disabled
     vk::SampleCountFlagBits msaa_samples = vk::SampleCountFlagBits::e1;
     LinuxSurfaceType linux_surface_type = LinuxSurfaceType::Unknown;
 
@@ -133,8 +135,9 @@ struct VKState : public renderer::State {
     bool init() override;
     bool create(std::unique_ptr<renderer::State> &state, const Config &config);
     void late_init(const Config &cfg, const std::string_view game_id, MemState &mem) override;
+    vk::SampleCountFlags query_msaa_support();
     // return the highest supported sample count that does not exceed the requested one
-    vk::SampleCountFlagBits select_msaa_samples(int requested);
+    vk::SampleCountFlagBits select_msaa_samples(int requested, bool warn = false);
     void cleanup() override;
 
     TextureCache *get_texture_cache() override {

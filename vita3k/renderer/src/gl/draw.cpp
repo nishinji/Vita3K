@@ -64,6 +64,11 @@ void draw(GLState &renderer, GLContext &context, const FeatureState &features, S
     const SceGxmFragmentProgram &gxm_fragment_program = *context.record.fragment_program.get(mem);
     const SceGxmProgram &fragment_program_gxp = *gxm_fragment_program.program.get(mem);
 
+    // reading the color attachment in the shader is not possible with a multisampled framebuffer
+    if (context.msaa_framebuffer && (fragment_program_gxp.is_frag_color_used() || fragment_program_gxp.is_native_color() || !context.self_sampling_indices.empty()))
+        disable_msaa(context);
+    context.msaa_dirty |= context.msaa_framebuffer != 0;
+
     if (!renderer.features.use_mask_bit && gxm_fragment_program.is_maskupdate) {
         static bool has_happened = false;
         LOG_ERROR_IF(!has_happened, "Mask bit is disabled!");

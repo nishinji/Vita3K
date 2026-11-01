@@ -184,13 +184,9 @@ VKRenderTarget::VKRenderTarget(VKState &state, const SceGxmRenderTargetParams &p
         depthstencil.height *= 2;
     }
 
-    if (state.msaa_samples != vk::SampleCountFlagBits::e1) {
+    if (state.msaa_supported && (state.msaa_samples != vk::SampleCountFlagBits::e1 || params.multisampleMode != SCE_GXM_MULTISAMPLE_NONE)) {
         // the depth-stencil is the target of the resolve operation so it must be backed by memory
         depthstencil.init_image(vk::ImageUsageFlagBits::eDepthStencilAttachment);
-
-        depthstencil_ms = vkutil::Image(depthstencil.width, depthstencil.height, state.deep_stencil_use);
-        depthstencil_ms.samples = state.msaa_samples;
-        depthstencil_ms.init_image(vk::ImageUsageFlagBits::eDepthStencilAttachment);
     } else {
         depthstencil.init_image(vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eTransientAttachment);
     }
@@ -268,7 +264,8 @@ void destroy(VKState &state, std::unique_ptr<RenderTarget> &rt) {
     FrameObject &frame = state.frame();
     frame.destroy_queue.add_image(render_target.color);
     frame.destroy_queue.add_image(render_target.depthstencil);
-    frame.destroy_queue.add_image(render_target.depthstencil_ms);
+    for (auto &depthstencil_ms : render_target.depthstencil_ms)
+        frame.destroy_queue.add_image(depthstencil_ms);
     frame.destroy_queue.add(render_target.mask_framebuffer);
     frame.destroy_queue.add_image(render_target.mask);
 

@@ -218,21 +218,27 @@ void set_context(VKContext &context, MemState &mem, VKRenderTarget *rt, const Fe
         // also retrieve / create the shader interlock pass
         context.current_shader_interlock_pass = context.state.pipeline_cache.retrieve_render_pass(vk_format, true, true, color_surface_fin == nullptr, true);
 
+    // use the sample count forced by the user, or the one asked by the game if the result is downscaled to the surface
+    vk::SampleCountFlagBits msaa_samples = state.msaa_samples;
+    if (rt->multisample_mode != SCE_GXM_MULTISAMPLE_NONE && context.record.color_surface.downscale)
+        msaa_samples = std::max(msaa_samples, state.select_msaa_samples(rt->multisample_mode == SCE_GXM_MULTISAMPLE_4X ? 4 : 2));
+
     // the depth-stencil is not multisampled when read from the memory, same for the gamma view of the shader interlock which cannot be sampled
-    const bool use_msaa = state.msaa_samples != vk::SampleCountFlagBits::e1 && color_surface_fin != nullptr && !force_load
+    const bool use_msaa = msaa_samples != vk::SampleCountFlagBits::e1 && color_surface_fin != nullptr && !force_load
         && (vk_format == vk::Format::eR8G8B8A8Unorm || vk_format == vk::Format::eR16G16B16A16Sfloat
             || (vk_format == vk::Format::eR8G8B8A8Srgb && !state.features.support_shader_interlock))
-        && state.pipeline_cache.retrieve_msaa_unresolve_pipeline(vk_format);
-    const vk::RenderPass msaa_render_pass = use_msaa ? state.pipeline_cache.retrieve_msaa_render_pass(vk_format, false) : nullptr;
-    const vk::RenderPass msaa_unresolve_pass = use_msaa ? state.pipeline_cache.retrieve_msaa_unresolve_render_pass(vk_format) : nullptr;
+        && state.pipeline_cache.retrieve_msaa_unresolve_pipeline(vk_format, msaa_samples);
+    const vk::RenderPass msaa_render_pass = use_msaa ? state.pipeline_cache.retrieve_msaa_render_pass(vk_format, msaa_samples, false) : nullptr;
+    const vk::RenderPass msaa_unresolve_pass = use_msaa ? state.pipeline_cache.retrieve_msaa_unresolve_render_pass(vk_format, msaa_samples) : nullptr;
 
     Framebuffer &framebuffer = state.surface_cache.retrieve_framebuffer_handle(mem, color_surface_fin, ds_surface_fin, context.current_render_pass, context.current_shader_interlock_pass,
-        context.current_color_view, context.current_ds_view, msaa_render_pass, msaa_unresolve_pass, vk_format);
+        context.current_color_view, context.current_ds_view, msaa_render_pass, msaa_unresolve_pass, vk_format, msaa_samples);
     context.current_framebuffer = framebuffer.standard;
     context.current_shader_interlock_framebuffer = framebuffer.shader_interlock;
     context.current_color_base_image = framebuffer.base_image;
 
     context.msaa_active = use_msaa && framebuffer.msaa;
+    context.msaa_samples = msaa_samples;
     context.msaa_used = false;
     context.msaa_unresolve_pending = context.msaa_active;
     if (context.msaa_active) {
@@ -410,7 +416,7 @@ static vk::DescriptorSet retrieve_msaa_descriptor(VKState &state, FrameDescripto
 
 vk::RenderPass VKContext::retrieve_scene_render_pass(bool force_load, bool force_store) {
     if (msaa_active)
-        return state.pipeline_cache.retrieve_msaa_render_pass(current_color_format, force_load);
+        return state.pipeline_cache.retrieve_msaa_render_pass(current_color_format, msaa_samples, force_load);
     return state.pipeline_cache.retrieve_render_pass(current_color_format, force_load, force_store, !record.color_surface.data);
 }
 
@@ -431,12 +437,12 @@ void VKContext::record_msaa_unresolve() {
 
     const vk::Rect2D area{ { 0, 0 }, msaa_unresolve_extent };
     const vk::RenderPassBeginInfo begin_info{
-        .renderPass = state.pipeline_cache.retrieve_msaa_unresolve_render_pass(current_color_format),
+        .renderPass = state.pipeline_cache.retrieve_msaa_unresolve_render_pass(current_color_format, msaa_samples),
         .framebuffer = msaa_unresolve_framebuffer,
         .renderArea = area
     };
     render_cmd.beginRenderPass(begin_info, vk::SubpassContents::eInline);
-    render_cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, state.pipeline_cache.retrieve_msaa_unresolve_pipeline(current_color_format));
+    render_cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, state.pipeline_cache.retrieve_msaa_unresolve_pipeline(current_color_format, msaa_samples));
     render_cmd.setViewport(0, vk::Viewport{ 0.f, 0.f, static_cast<float>(area.extent.width), static_cast<float>(area.extent.height), 0.f, 1.f });
     render_cmd.setScissor(0, area);
     render_cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, state.pipeline_cache.get_msaa_unresolve_pipeline_layout(), 0, source_set, {});
@@ -817,7 +823,9 @@ void VKContext::check_for_macroblock_change(bool is_draw) {
         // TODO: with the feedback loop extension we can do better
         ignore_macroblock = true;
         // in this case we must load and store the depth stencil each time
-        current_render_pass = retrieve_scene_render_pass(true, true);
+        // (the multisampled one has no content to load until a pass was started)
+        if (!msaa_active || msaa_used)
+            current_render_pass = retrieve_scene_render_pass(true, true);
     }
 
     // use the scissor to know in which macroblock we are

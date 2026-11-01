@@ -343,6 +343,7 @@ struct VKContext : public renderer::Context {
 
     // true while the scene is rendered to the multisampled attachments (see set_context)
     bool msaa_active = false;
+    vk::SampleCountFlagBits msaa_samples = vk::SampleCountFlagBits::e1;
     // has a multisampled render pass been started in this scene
     bool msaa_used = false;
     // does the multisampled color still have to be filled with the content of the single sampled one
@@ -394,8 +395,8 @@ struct VKRenderTarget : public renderer::RenderTarget {
     uint16_t height;
     vkutil::Image color;
     vkutil::Image depthstencil;
-    // multisampled depth-stencil, only created when msaa is enabled
-    vkutil::Image depthstencil_ms;
+    // multisampled depth-stencil for each sample count (see msaa_sample_index), created when a scene needs it
+    vkutil::Image depthstencil_ms[3];
     vkutil::Image mask;
     vk::Framebuffer mask_framebuffer;
     bool mask_may_reject = true;

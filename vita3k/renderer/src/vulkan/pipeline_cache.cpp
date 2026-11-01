@@ -144,7 +144,7 @@ void PipelineCache::init(bool support_rasterized_order_access) {
         attachments_layout = state.device.createDescriptorSetLayout(descriptor_info);
     }
 
-    if (state.msaa_samples != vk::SampleCountFlagBits::e1) {
+    if (state.msaa_supported) {
         // the single sampled color surface read when filling the multisampled one
         const vk::DescriptorSetLayoutBinding binding{
             .binding = 0,
@@ -426,10 +426,12 @@ void PipelineCache::cleanup() {
                 render_passes[i][j][k].clear();
             }
 
-    for (auto &passes : msaa_render_passes) {
-        for (auto &[fmt, pass] : passes)
-            state.device.destroy(pass);
-        passes.clear();
+    for (auto &passes_by_load : msaa_render_passes) {
+        for (auto &passes : passes_by_load) {
+            for (auto &[fmt, pass] : passes)
+                state.device.destroy(pass);
+            passes.clear();
+        }
     }
     for (auto &[fmt, pass] : msaa_unresolve_passes)
         state.device.destroy(pass);
@@ -778,13 +780,11 @@ vk::RenderPass PipelineCache::retrieve_render_pass(vk::Format format, bool force
     return render_passes_map[format];
 }
 
-vk::RenderPass PipelineCache::retrieve_msaa_render_pass(vk::Format format, bool force_load) {
-    auto &passes = msaa_render_passes[force_load];
+vk::RenderPass PipelineCache::retrieve_msaa_render_pass(vk::Format format, vk::SampleCountFlagBits samples, bool force_load) {
+    auto &passes = msaa_render_passes[msaa_sample_index(samples)][force_load];
     auto it = passes.find(format);
     if (it != passes.end())
         return it->second;
-
-    const vk::SampleCountFlagBits samples = state.msaa_samples;
 
     // 0: multisampled color, 1: multisampled depth-stencil, 2: resolved color, 3: resolved depth-stencil
     // the multisampled attachments are always kept as a scene can be split in multiple render passes
@@ -884,15 +884,16 @@ vk::RenderPass PipelineCache::retrieve_msaa_render_pass(vk::Format format, bool 
     return passes[format] = state.device.createRenderPass2KHR(pass_info);
 }
 
-vk::RenderPass PipelineCache::retrieve_msaa_unresolve_render_pass(vk::Format format) {
-    auto it = msaa_unresolve_passes.find(format);
+vk::RenderPass PipelineCache::retrieve_msaa_unresolve_render_pass(vk::Format format, vk::SampleCountFlagBits samples) {
+    const std::pair key = { format, samples };
+    auto it = msaa_unresolve_passes.find(key);
     if (it != msaa_unresolve_passes.end())
         return it->second;
 
     // the content of the multisampled color is entirely replaced
     const vk::AttachmentDescription attachment{
         .format = format,
-        .samples = state.msaa_samples,
+        .samples = samples,
         .loadOp = vk::AttachmentLoadOp::eDontCare,
         .storeOp = vk::AttachmentStoreOp::eStore,
         .initialLayout = vk::ImageLayout::eUndefined,
@@ -921,11 +922,12 @@ vk::RenderPass PipelineCache::retrieve_msaa_unresolve_render_pass(vk::Format for
     pass_info.setAttachments(attachment);
     pass_info.setSubpasses(subpass);
     pass_info.setDependencies(dependencies);
-    return msaa_unresolve_passes[format] = state.device.createRenderPass(pass_info);
+    return msaa_unresolve_passes[key] = state.device.createRenderPass(pass_info);
 }
 
-vk::Pipeline PipelineCache::retrieve_msaa_unresolve_pipeline(vk::Format format) {
-    auto it = msaa_unresolve_pipelines.find(format);
+vk::Pipeline PipelineCache::retrieve_msaa_unresolve_pipeline(vk::Format format, vk::SampleCountFlagBits samples) {
+    const std::pair key = { format, samples };
+    auto it = msaa_unresolve_pipelines.find(key);
     if (it != msaa_unresolve_pipelines.end())
         return it->second;
 
@@ -948,7 +950,7 @@ vk::Pipeline PipelineCache::retrieve_msaa_unresolve_pipeline(vk::Format format) 
         .frontFace = vk::FrontFace::eCounterClockwise,
         .lineWidth = 1.0f
     };
-    const vk::PipelineMultisampleStateCreateInfo multisampling{ .rasterizationSamples = state.msaa_samples };
+    const vk::PipelineMultisampleStateCreateInfo multisampling{ .rasterizationSamples = samples };
     const vk::PipelineColorBlendAttachmentState blend_attachment{
         .blendEnable = VK_FALSE,
         .colorWriteMask = vkutil::default_color_mask
@@ -981,7 +983,7 @@ vk::Pipeline PipelineCache::retrieve_msaa_unresolve_pipeline(vk::Format format) 
         .pColorBlendState = &color_blending,
         .pDynamicState = &dynamic_info,
         .layout = msaa_unresolve_pipeline_layout,
-        .renderPass = retrieve_msaa_unresolve_render_pass(format),
+        .renderPass = retrieve_msaa_unresolve_render_pass(format, samples),
         .subpass = 0
     };
 
@@ -990,7 +992,7 @@ vk::Pipeline PipelineCache::retrieve_msaa_unresolve_pipeline(vk::Format format) 
         LOG_CRITICAL("Failed to create the msaa unresolve pipeline.");
         return nullptr;
     }
-    return msaa_unresolve_pipelines[format] = result.value;
+    return msaa_unresolve_pipelines[key] = result.value;
 }
 
 vk::PipelineVertexInputStateCreateInfo PipelineCache::get_vertex_input_state(const SceGxmVertexProgram &vertex_program, MemState &mem) {
@@ -1300,9 +1302,9 @@ vk::Pipeline PipelineCache::retrieve_pipeline(VKContext &context, SceGxmPrimitiv
     key ^= vertex_program_gxm.key_hash;
 
     // the mask pass is never multisampled
-    const vk::SampleCountFlagBits samples = context.msaa_active && !fragment_program_gxm.is_maskupdate ? state.msaa_samples : vk::SampleCountFlagBits::e1;
+    const vk::SampleCountFlagBits samples = context.msaa_active && !fragment_program_gxm.is_maskupdate ? context.msaa_samples : vk::SampleCountFlagBits::e1;
     if (samples != vk::SampleCountFlagBits::e1)
-        key ^= 0x3b9ac9d1f7a64e25ULL;
+        key ^= 0x3b9ac9d1f7a64e25ULL * static_cast<uint64_t>(samples);
 
     // and also add the primitive type
     key ^= static_cast<uint64_t>(type);

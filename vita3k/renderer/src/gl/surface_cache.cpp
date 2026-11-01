@@ -39,6 +39,7 @@ void GLSurfaceCache::cleanup() {
     }
 
     framebuffer_array.clear();
+    msaa_framebuffers.clear();
 
     typeless_copy_buffer.cleanup();
     typeless_copy_buffer_size = 0;
@@ -737,6 +738,49 @@ GLuint GLSurfaceCache::retrieve_framebuffer_handle(const State &state, const Mem
     }
 
     return fb[0];
+}
+
+GLuint GLSurfaceCache::retrieve_msaa_framebuffer(GLuint color_texture, GLuint ds_texture, GLenum color_format, GLsizei samples, GLsizei width, GLsizei height) {
+    // the entries do not own any texture, drop them all if too many surfaces were used
+    constexpr std::size_t max_msaa_framebuffers = 64;
+    const std::tuple key = { color_texture, ds_texture, samples };
+    if (msaa_framebuffers.size() >= max_msaa_framebuffers && !msaa_framebuffers.contains(key))
+        msaa_framebuffers.clear();
+
+    GLMsaaFramebuffer &msaa = msaa_framebuffers[key];
+    if (!msaa.framebuffer[0]
+        && (!msaa.framebuffer.init(glGenFramebuffers, glDeleteFramebuffers) || !msaa.color.init(glGenRenderbuffers, glDeleteRenderbuffers)
+            || !msaa.depth_stencil.init(glGenRenderbuffers, glDeleteRenderbuffers))) {
+        LOG_ERROR("Can't initialize the multisampled framebuffer!");
+        msaa_framebuffers.erase(key);
+        return 0;
+    }
+
+    if (msaa.width != width || msaa.height != height || msaa.color_format != color_format) {
+        glBindRenderbuffer(GL_RENDERBUFFER, msaa.color[0]);
+        glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, color_format, width, height);
+        glBindRenderbuffer(GL_RENDERBUFFER, msaa.depth_stencil[0]);
+        glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_DEPTH24_STENCIL8, width, height);
+        glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
+        glBindFramebuffer(GL_FRAMEBUFFER, msaa.framebuffer[0]);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, msaa.color[0]);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, msaa.depth_stencil[0]);
+        const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+        if (status != GL_FRAMEBUFFER_COMPLETE) {
+            LOG_ERROR("The multisampled framebuffer is not complete ({:#x})", status);
+            msaa_framebuffers.erase(key);
+            return 0;
+        }
+
+        msaa.width = width;
+        msaa.height = height;
+        msaa.color_format = color_format;
+    }
+
+    return msaa.framebuffer[0];
 }
 
 GLuint GLSurfaceCache::sourcing_color_surface_for_presentation(Ptr<const void> address, uint32_t width, uint32_t height, const std::uint32_t pitch, float *uvs, const float res_multiplier, SceFVector2 &texture_size) {

@@ -1035,7 +1035,8 @@ void VKState::late_init(const Config &cfg, const std::string_view game_id, MemSt
         || std::string_view(physical_device_properties.deviceName).contains("NVIDIA");
 #endif
 
-    msaa_samples = select_msaa_samples(cfg.current_config.msaa_samples);
+    msaa_supported = query_msaa_support();
+    msaa_samples = select_msaa_samples(cfg.current_config.msaa_samples, true);
     if (msaa_samples != vk::SampleCountFlagBits::e1)
         LOG_INFO("Using {}x MSAA", static_cast<uint32_t>(msaa_samples));
 
@@ -1044,14 +1045,9 @@ void VKState::late_init(const Config &cfg, const std::string_view game_id, MemSt
     texture_cache.init(true, texture_folder(), game_id);
 }
 
-vk::SampleCountFlagBits VKState::select_msaa_samples(int requested) {
-    if (requested <= 1)
-        return vk::SampleCountFlagBits::e1;
-
-    if (!support_depth_stencil_resolve || deep_stencil_use == vk::Format::eD16Unorm) {
-        LOG_WARN("MSAA is not supported by this GPU, disabling it");
-        return vk::SampleCountFlagBits::e1;
-    }
+vk::SampleCountFlags VKState::query_msaa_support() {
+    if (!support_depth_stencil_resolve || deep_stencil_use == vk::Format::eD16Unorm)
+        return {};
 
     const vk::PhysicalDeviceLimits &limits = physical_device_properties.limits;
     vk::SampleCountFlags supported = limits.framebufferColorSampleCounts & limits.framebufferDepthSampleCounts & limits.framebufferStencilSampleCounts;
@@ -1066,16 +1062,24 @@ vk::SampleCountFlagBits VKState::select_msaa_samples(int requested) {
     restrict_to_format(vk::Format::eR16G16B16A16Sfloat, vk::ImageUsageFlagBits::eColorAttachment);
     restrict_to_format(deep_stencil_use, vk::ImageUsageFlagBits::eDepthStencilAttachment);
 
+    return supported & (vk::SampleCountFlagBits::e2 | vk::SampleCountFlagBits::e4 | vk::SampleCountFlagBits::e8);
+}
+
+vk::SampleCountFlagBits VKState::select_msaa_samples(int requested, bool warn) {
+    if (requested <= 1)
+        return vk::SampleCountFlagBits::e1;
+
     constexpr std::array candidates = { vk::SampleCountFlagBits::e8, vk::SampleCountFlagBits::e4, vk::SampleCountFlagBits::e2 };
     for (const auto candidate : candidates) {
-        if (static_cast<uint32_t>(candidate) <= static_cast<uint32_t>(requested) && (supported & candidate)) {
-            if (static_cast<uint32_t>(candidate) != static_cast<uint32_t>(requested))
+        if (static_cast<uint32_t>(candidate) <= static_cast<uint32_t>(requested) && (msaa_supported & candidate)) {
+            if (warn && static_cast<uint32_t>(candidate) != static_cast<uint32_t>(requested))
                 LOG_WARN("{}x MSAA is not supported by this GPU, using {}x instead", requested, static_cast<uint32_t>(candidate));
             return candidate;
         }
     }
 
-    LOG_WARN("MSAA is not supported by this GPU, disabling it");
+    if (warn)
+        LOG_WARN("MSAA is not supported by this GPU, disabling it");
     return vk::SampleCountFlagBits::e1;
 }
 

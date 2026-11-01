@@ -65,6 +65,11 @@ struct GLState : public renderer::State {
 
     bool context_is_current = false;
 
+    // number of samples forced by the user for all the scenes, 0 if multisampling is disabled
+    GLsizei msaa_samples = 0;
+    // maximum number of samples all the formats usable with multisampling support, 0 if it is not supported
+    GLsizei msaa_max_samples = 0;
+
     std::deque<PendingReadback> pending_readbacks;
     std::vector<ReadbackBuffer> free_readback_buffers;
     std::vector<uint8_t> readback_scratch;
