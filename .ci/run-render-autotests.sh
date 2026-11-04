@@ -23,8 +23,9 @@ vpk="$AUTOTESTS_DIR/build/tests/vita-autotests.vpk"
 for worker in $(seq 0 $((JOBS - 1))); do
     root="$work_dir/$worker"
     mkdir -p "$root/config/Vita3K" "$AUTOTESTS_DIR/build/logs"
-    # Without draws skipped while their pipelines compile, a capture is the same in every run
-    printf 'async-pipeline-compilation: false\n' >"$root/config/Vita3K/config.yml"
+    # Surface sync, off by default, gets what the GPU drew into the framebuffer the test reads, and
+    # without draws skipped while their pipelines compile, a capture is the same in every run
+    printf 'disable-surface-sync: false\nasync-pipeline-compilation: false\n' >"$root/config/Vita3K/config.yml"
     XDG_CONFIG_HOME="$root/config" XDG_DATA_HOME="$root/data" XDG_CACHE_HOME="$root/cache" \
         "$VITA3K" -B Vulkan --frontend sdl --launch-uri "psgm:play?titleid=$TITLE_ID&arg=list" "$vpk" \
         >"$AUTOTESTS_DIR/build/logs/install-$worker.log" 2>&1
@@ -45,7 +46,7 @@ python3 run_tests.py -v -j "$JOBS" -t 120 -E "$command" --ux0 "$work_dir/{worker
 # Annotations, which the run's page shows without signing in, unlike the log and the summary
 if [ -n "${GITHUB_ACTIONS:-}" ]; then
     while IFS= read -r line; do
-        [ -n "$line" ] && echo "::notice title=Vita3K on lavapipe::${line//[$'']/}"
+        [ -n "$line" ] && echo "::notice title=Vita3K on lavapipe::${line//$''/}"
     done <<<"$device_lines"
     grep -E '^(PASS|FAIL|SKIP) |passed' build/render.log | while IFS= read -r line; do
         echo "::notice title=Render test::$line"
