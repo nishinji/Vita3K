@@ -1292,8 +1292,13 @@ bool VKSurfaceCache::check_for_surface(MemState &mem, Address source_address, Ca
         };
         state.request_queue.push(CallbackRequest{ new CallbackRequestFunction(std::move(vk_callback)) });
 
-        if (returned_info)
-            state.request_queue.push(PostSurfaceSyncRequest{ returned_info });
+        if (returned_info) {
+            // like at the end of a scene, the copy went to the GPU side of a double buffer
+            if (state.mapping_method == MappingMethod::DoubleBuffer && returned_info->need_buffer_sync)
+                state.request_queue.push(BufferSyncRequest{ returned_info->data.address(), static_cast<uint32_t>(returned_info->total_bytes) });
+            if (returned_info->need_post_surface_sync)
+                state.request_queue.push(PostSurfaceSyncRequest{ returned_info });
+        }
     }
 
     // now push the callback
