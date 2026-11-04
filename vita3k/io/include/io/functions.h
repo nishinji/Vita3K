@@ -60,6 +60,8 @@ bool copy_path(const fs::path &src_path, const fs::path &vita_fs_path, const std
 SceUID open_file(IOState &io, const char *path, const int flags, const fs::path &vita_fs_path, const char *export_name);
 int read_file(void *data, IOState &io, SceUID fd, SceSize size, const char *export_name);
 int write_file(SceUID fd, const void *data, SceSize size, const IOState &io, const char *export_name);
+// Writes what is buffered for the file of fd, so another descriptor of the file and a reader of it see it
+int sync_file(SceUID fd, const IOState &io, const char *export_name);
 int truncate_file(SceUID fd, unsigned long long length, const IOState &io, const char *export_name);
 SceOff seek_file(SceUID fd, SceOff offset, SceIoSeekMode whence, IOState &io, const char *export_name);
 SceOff tell_file(IOState &io, const SceUID fd, const char *export_name);

@@ -305,9 +305,9 @@ EXPORT(int, sceIoSetThreadDefaultPriorityForSystem) {
     return UNIMPLEMENTED();
 }
 
-EXPORT(int, sceIoSyncByFd) {
-    TRACY_FUNC(sceIoSyncByFd);
-    return UNIMPLEMENTED();
+EXPORT(int, sceIoSyncByFd, const SceUID fd, const int flag) {
+    TRACY_FUNC(sceIoSyncByFd, fd, flag);
+    return sync_file(fd, emuenv.io, export_name);
 }
 
 EXPORT(int, sceIoSyncByFdAsync) {

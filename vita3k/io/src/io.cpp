@@ -419,6 +419,25 @@ int read_file(void *data, IOState &io, const SceUID fd, const SceSize size, cons
     return IO_ERROR(SCE_ERROR_ERRNO_EBADFD);
 }
 
+int sync_file(SceUID fd, const IOState &io, const char *export_name) {
+    if (fd < 0)
+        return IO_ERROR(SCE_ERROR_ERRNO_EBADFD);
+
+    if (io.tty_files.find(fd) != io.tty_files.end())
+        return 0;
+
+    const auto file = io.std_files.find(fd);
+    if (file == io.std_files.end())
+        return IO_ERROR(SCE_ERROR_ERRNO_EBADFD);
+
+    FILE *pointer = file->second.get_file_pointer();
+    if (pointer && file->second.can_write_file())
+        fflush(pointer);
+
+    LOG_TRACE_IF(log_file_op, "{}: Syncing fd: {}", export_name, log_hex(fd));
+    return 0;
+}
+
 int write_file(SceUID fd, const void *data, const SceSize size, const IOState &io, const char *export_name) {
     assert(data != nullptr);
     assert(size >= 0);
