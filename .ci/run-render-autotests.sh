@@ -29,7 +29,9 @@ for worker in $(seq 0 $((JOBS - 1))); do
         "$VITA3K" -B Vulkan --frontend sdl --launch-uri "psgm:play?titleid=$TITLE_ID&arg=list" "$vpk" \
         >"$AUTOTESTS_DIR/build/logs/install-$worker.log" 2>&1
 done
-grep -h -i -E "vulkan device|memory mapping|surface sync" "$AUTOTESTS_DIR/build/logs/install-0.log" || true
+# What decides whether the captures can hold anything: the device, and how guest memory is mapped
+device_lines="$(grep -h -i -E "vulkan device|memory mapping|external host" "$AUTOTESTS_DIR/build/logs/install-0.log" || true)"
+echo "$device_lines"
 
 command="env XDG_CONFIG_HOME=$work_dir/{worker}/config XDG_DATA_HOME=$work_dir/{worker}/data"
 command+=" XDG_CACHE_HOME=$work_dir/{worker}/cache $VITA3K -B Vulkan --frontend sdl -r $TITLE_ID"
@@ -39,6 +41,16 @@ cd "$AUTOTESTS_DIR"
 status=0
 python3 run_tests.py -v -j "$JOBS" -t 120 -E "$command" --ux0 "$work_dir/{worker}/data/Vita3K/Vita3K/ux0" tests/render \
     | tee build/render.log || status=$?
+
+# Annotations, which the run's page shows without signing in, unlike the log and the summary
+if [ -n "${GITHUB_ACTIONS:-}" ]; then
+    while IFS= read -r line; do
+        [ -n "$line" ] && echo "::notice title=Vita3K on lavapipe::${line//[$'']/}"
+    done <<<"$device_lines"
+    grep -E '^(PASS|FAIL|SKIP) |passed' build/render.log | while IFS= read -r line; do
+        echo "::notice title=Render test::$line"
+    done
+fi
 
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     {
