@@ -42,10 +42,21 @@ status=0
 python3 run_tests.py -v -j "$JOBS" -t 120 -E "$command" --ux0 "$work_dir/{worker}/data/Vita3K/Vita3K/ux0" tests/render \
     | tee build/render.log || status=$?
 
+# Temporary: the log of one render test, for the DEBUG lines of the CPU read sync
+XDG_CONFIG_HOME="$work_dir/0/config" XDG_DATA_HOME="$work_dir/0/data" XDG_CACHE_HOME="$work_dir/0/cache"     timeout 120 "$VITA3K" -B Vulkan --frontend sdl -r "$TITLE_ID" --launch-uri "psgm:play?titleid=$TITLE_ID&arg=render_clear"     >build/logs/render_clear-debug.log 2>&1 || true
+debug_lines="$(grep -E "DEBUG|memory mapping|rror" build/logs/render_clear-debug.log | sed -E 's/^\[[0-9:.]+\] //' | head -n 25 || true)"
+echo "$debug_lines"
+if [ -n "${GITHUB_ACTIONS:-}" ]; then
+    while IFS= read -r line; do
+        [ -n "$line" ] && echo "::notice title=render_clear log::${line//[$'']/}"
+    done <<<"$debug_lines"
+fi
+
 # Annotations, which the run's page shows without signing in, unlike the log and the summary
 if [ -n "${GITHUB_ACTIONS:-}" ]; then
     while IFS= read -r line; do
-        [ -n "$line" ] && echo "::notice title=Vita3K on lavapipe::${line//[$'']/}"
+        [ -n "$line" ] && echo "::notice title=Vita3K on lavapipe::${line//[$'
+']/}"
     done <<<"$device_lines"
     grep -E '^(PASS|FAIL|SKIP) |passed' build/render.log | while IFS= read -r line; do
         echo "::notice title=Render test::$line"

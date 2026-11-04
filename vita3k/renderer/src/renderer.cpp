@@ -284,6 +284,7 @@ bool is_renderer_thread() {
 }
 
 void sync_surface_for_cpu_read(State &state, Address address) {
+    LOG_INFO("DEBUG cpu read sync {}: renderer thread {}, backend {}, mapping {}, surface sync off {}", log_hex(address), is_renderer_thread(), static_cast<int>(state.current_backend), state.features.enable_memory_mapping, state.disable_surface_sync);
     if (is_renderer_thread() || state.current_backend != Backend::Vulkan || !state.features.enable_memory_mapping
         || state.disable_surface_sync || state.render_abort.load(std::memory_order_relaxed))
         return;
