@@ -14,6 +14,8 @@ env:
   SCCACHE_GHA_ENABLED: "true"
   # The VitaAutotests commit to test with. Bump it to pick up new tests.
   AUTOTESTS_REF: 78b977da8fbc9aaf4d57710d044a8eee4a63dee6
+  # The VitaAutotests branch with the render tests and the images a Vita gives for them
+  RENDER_AUTOTESTS_REF: render-tests-ci
 
 jobs:
   desktop-build:
@@ -273,6 +275,61 @@ jobs:
         run: |
           chmod +x vita3k/bin/Vita3K
           bash ./.ci/run-autotests.sh vita3k/bin/Vita3K autotests
+
+  render-autotests:
+    name: VitaAutotests render tests (linux-x64)
+    needs: linux-x64-build
+    runs-on: ubuntu-26.04
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up the Linux environment
+        run: bash ./.ci/setup-linux.sh
+
+      # lavapipe, Mesa's CPU Vulkan driver
+      - name: Install the render tests' dependencies
+        run: sudo apt-get -y install mesa-vulkan-drivers
+
+      - name: Install Qt 6.11.0
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          modules: qtmultimedia
+          cache: true
+          install-deps: 'true'
+
+      - name: Download the Linux x64 build
+        uses: actions/download-artifact@v8
+        with:
+          pattern: vita3k-*-linux-x64
+          merge-multiple: true
+          path: vita3k
+
+      - name: Check out the autotests with the render tests
+        uses: actions/checkout@v7
+        with:
+          repository: Vita3K/VitaAutotests
+          ref: ${{ env.RENDER_AUTOTESTS_REF }}
+          path: autotests
+
+      - name: Build the autotests
+        run: bash ./.ci/build-autotests.sh autotests
+
+      - name: Run the render tests
+        run: |
+          chmod +x vita3k/bin/Vita3K
+          bash ./.ci/run-render-autotests.sh vita3k/bin/Vita3K autotests
+
+      - name: Upload the captures
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: render-autotests
+          path: |
+            autotests/build/captures
+            autotests/build/logs
+            autotests/build/render.log
 
   android-build:
     name: Android
