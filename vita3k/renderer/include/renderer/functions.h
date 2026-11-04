@@ -100,6 +100,17 @@ void transfer_downscale(State &state, const SceGxmTransferImage *src, const SceG
 void transfer_fill(State &state, uint32_t fillColor, const SceGxmTransferImage *dest);
 void sync_surface_data(State &state, Context *ctx, const SceGxmNotification vertex_notification, const SceGxmNotification fragment_notification);
 
+// Marks the calling thread as one the renderer runs on, which must never wait for the renderer
+void mark_renderer_thread();
+bool is_renderer_thread();
+
+/**
+ * Gets the color surface that starts at address up to date in guest memory, so a CPU read that is about
+ * to happen sees what the GPU drew. Returns when it is done. Does nothing if there is no such surface
+ * or surface sync is not available, and when called from a renderer thread.
+ */
+void sync_surface_for_cpu_read(State &state, Address address);
+
 bool create_context(State &state, std::unique_ptr<Context> &context);
 void destroy_context(State &state, std::unique_ptr<Context> &context);
 void destroy_context_during_shutdown(State &state, std::unique_ptr<Context> &context);

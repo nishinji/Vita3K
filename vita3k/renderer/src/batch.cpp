@@ -81,6 +81,7 @@ static void process_batch(renderer::State &state, const FeatureState &features, 
     const static std::map<CommandOpcode, CommandHandlerFunc *> handlers = {
         { CommandOpcode::SetContext, cmd_handle_set_context },
         { CommandOpcode::SyncSurfaceData, cmd_handle_sync_surface_data },
+        { CommandOpcode::SyncSurfaceForCpuRead, cmd_handle_sync_surface_for_cpu_read },
         { CommandOpcode::MidSceneFlush, cmd_handle_mid_scene_flush },
         { CommandOpcode::CreateContext, cmd_handle_create_context },
         { CommandOpcode::CreateRenderTarget, cmd_handle_create_render_target },
@@ -185,6 +186,7 @@ void reset_command_list(CommandList &command_list) {
 }
 
 static void render_loop(renderer::State &state, DisplayState &display, GxmState &gxm, MemState &mem, Config &config) {
+    renderer::mark_renderer_thread();
     if (state.precompile_requested) {
         auto progress_overlay = state.overlay_manager
             ? state.overlay_manager->create<overlay::shader_precompile_progress>()

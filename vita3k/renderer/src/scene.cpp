@@ -15,6 +15,8 @@
 // with this program; if not, write to the Free Software Foundation, Inc.,
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
+#include <future>
+
 #include <gxm/functions.h>
 #include <gxm/types.h>
 #include <renderer/commands.h>
@@ -26,6 +28,8 @@
 #include <renderer/gl/types.h>
 
 #include <renderer/vulkan/functions.h>
+#include <renderer/vulkan/state.h>
+#include <renderer/vulkan/types.h>
 
 #include <config/state.h>
 #include <util/log.h>
@@ -93,6 +97,26 @@ COMMAND(handle_set_context) {
         REPORT_MISSING(renderer.current_backend);
         break;
     }
+}
+
+COMMAND(handle_sync_surface_for_cpu_read) {
+    TRACY_FUNC_COMMANDS(handle_sync_surface_for_cpu_read);
+
+    const Address address = helper.pop<Address>();
+    std::promise<void> *promise = helper.pop<std::promise<void> *>();
+
+    bool pending = false;
+    if (renderer.current_backend == Backend::Vulkan && renderer.features.enable_memory_mapping && !renderer.disable_surface_sync) {
+        vulkan::CallbackRequestFunction done = [promise]() {
+            promise->set_value();
+        };
+        pending = dynamic_cast<vulkan::VKState &>(renderer).surface_cache.check_for_surface(mem, address, done, 0);
+    }
+
+    // Without a sync to wait for, the client doesn't have to wait for anything
+    if (!pending)
+        promise->set_value();
+    complete_command(renderer, helper, 0);
 }
 
 COMMAND(handle_sync_surface_data) {

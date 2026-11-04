@@ -42,6 +42,7 @@ using PageNameMap = std::map<int, std::string>;
 struct ProtectBlockInfo {
     uint32_t size = 0;
     ProtectCallback callback;
+    ProtectResolveCallback resolve;
 };
 
 struct ProtectSegmentInfo {

@@ -84,7 +84,12 @@ enum class CommandOpcode : std::uint8_t {
     NewFrame,
 
     DestroyRenderTarget,
-    DestroyContext
+    DestroyContext,
+
+    /**
+     * Get the color surface at an address up to date in guest memory before the CPU reads it.
+     */
+    SyncSurfaceForCpuRead
 };
 
 enum CommandErrorCode {

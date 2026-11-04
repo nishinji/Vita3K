@@ -22,6 +22,9 @@
 
 using Address = uint32_t;
 using ProtectCallback = std::function<bool(Address, bool)>;
+// Called after the page was unprotected and without any lock of the memory state held, so it may wait
+// for other threads that access the protected memory. The access that triggered it is retried afterwards.
+using ProtectResolveCallback = std::function<void(Address, bool)>;
 
 // Powers of 10
 constexpr size_t KB(size_t kb) {

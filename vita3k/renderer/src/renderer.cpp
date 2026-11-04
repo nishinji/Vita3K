@@ -15,7 +15,9 @@
 // with this program; if not, write to the Free Software Foundation, Inc.,
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
+#include <chrono>
 #include <cstdint>
+#include <future>
 #include <renderer/functions.h>
 #include <renderer/state.h>
 #include <renderer/types.h>
@@ -269,6 +271,33 @@ void transfer_fill(State &state, uint32_t fillColor, const SceGxmTransferImage *
 
 void sync_surface_data(State &state, Context *ctx, const SceGxmNotification vertex_notification, const SceGxmNotification fragment_notification) {
     renderer::add_command(ctx, renderer::CommandOpcode::SyncSurfaceData, nullptr, vertex_notification, fragment_notification);
+}
+
+static thread_local bool renderer_thread = false;
+
+void mark_renderer_thread() {
+    renderer_thread = true;
+}
+
+bool is_renderer_thread() {
+    return renderer_thread;
+}
+
+void sync_surface_for_cpu_read(State &state, Address address) {
+    if (is_renderer_thread() || state.current_backend != Backend::Vulkan || !state.features.enable_memory_mapping
+        || state.disable_surface_sync || state.render_abort.load(std::memory_order_relaxed))
+        return;
+
+    std::promise<void> promise;
+    std::future<void> done = promise.get_future();
+    if (renderer::send_single_command(state, nullptr, renderer::CommandOpcode::SyncSurfaceForCpuRead, true, address, &promise) < 0)
+        return;
+
+    // The command only starts the sync, which ends when the wait thread gets to the callback it pushed
+    while (done.wait_for(std::chrono::milliseconds(100)) != std::future_status::ready) {
+        if (state.render_abort.load(std::memory_order_relaxed))
+            return;
+    }
 }
 
 bool create_context(State &state, std::unique_ptr<Context> &context) {

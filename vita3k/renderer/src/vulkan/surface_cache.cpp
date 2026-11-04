@@ -18,6 +18,7 @@
 #include <renderer/vulkan/surface_cache.h>
 
 #include <gxm/functions.h>
+#include <renderer/functions.h>
 #include <renderer/vulkan/gxm_to_vulkan.h>
 #include <renderer/vulkan/state.h>
 #include <renderer/vulkan/types.h>
@@ -124,7 +125,7 @@ static void ensure_surface_sync_buffer(vkutil::Buffer &buffer, vkutil::DestroyQu
     }
 }
 
-static void protect_surface(MemState &mem, ColorSurfaceCacheInfo &info) {
+static void protect_surface(VKState &state, MemState &mem, ColorSurfaceCacheInfo &info) {
     const bool trap_reads = (info.tiling == SurfaceTiling::Linear
         && format_support_surface_sync(info.format));
 
@@ -144,14 +145,26 @@ static void protect_surface(MemState &mem, ColorSurfaceCacheInfo &info) {
     // Don't track dirty for small surfaces to avoid false positives from unrelated writes
     std::shared_ptr<bool> dirty = small_surface ? nullptr : info.dirty;
 
-    add_protect(mem, addr_start, addr_end - addr_start, perm,
-        [dirty, need_sync](Address, bool write) {
+    // A read of a surface that is synced gets what the GPU drew, instead of what was there at the last sync
+    // (usually nothing). The first read starts the syncing, which keeps going after every scene on the
+    // surface, so it is done before the read goes on, when nothing else holds up the threads it waits for.
+    const Address surface_address = info.data.address();
+    ProtectResolveCallback resolve;
+    if (need_sync) {
+        resolve = [&state, need_sync, surface_address](Address, bool write) {
+            if (!write)
+                renderer::sync_surface_for_cpu_read(state, surface_address);
+            *need_sync = true;
+        };
+    }
+
+    add_protect(mem, addr_start, addr_end - addr_start, perm, [dirty, need_sync](Address, bool write) {
             if (write && dirty)
                 *dirty = true;
-            if (need_sync)
+            // A read is left to the resolve callback, which starts the sync that sets this
+            if (need_sync && write)
                 *need_sync = true;
-            return true;
-        });
+            return true; }, resolve);
 }
 
 ColorSurfaceCacheInfo::~ColorSurfaceCacheInfo() {
@@ -354,7 +367,7 @@ SurfaceRetrieveResult VKSurfaceCache::retrieve_color_surface_for_framebuffer(Mem
             color_surface_queue.set_as_mru(&info);
 
             if (info.data && *info.dirty)
-                protect_surface(mem, info);
+                protect_surface(state, mem, info);
             *info.dirty = false;
 
             last_written_surface = &info;
@@ -457,7 +470,7 @@ SurfaceRetrieveResult VKSurfaceCache::retrieve_color_surface_for_framebuffer(Mem
         // it is slow but well... we can't mprotect the buffer
         *info_added.need_surface_sync = color->surfaceType == SCE_GXM_COLOR_SURFACE_LINEAR;
     } else {
-        protect_surface(mem, info_added);
+        protect_surface(state, mem, info_added);
     }
 
     // it's not impossible that this surface will be rendered once and only used after, so do not skip any shader on it

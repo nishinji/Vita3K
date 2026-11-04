@@ -53,7 +53,7 @@ Address alloc(MemState &state, uint32_t size, const char *name, Address start_ad
 Address alloc_aligned(MemState &state, uint32_t size, const char *name, unsigned int alignment, Address start_addr = user_main_memory_start);
 void protect_inner(MemState &state, Address addr, uint32_t size, const MemPerm perm);
 void unprotect_inner(MemState &state, Address addr, uint32_t size);
-bool add_protect(MemState &state, Address addr, const uint32_t size, const MemPerm perm, const ProtectCallback &callback);
+bool add_protect(MemState &state, Address addr, const uint32_t size, const MemPerm perm, const ProtectCallback &callback, const ProtectResolveCallback &resolve = {});
 void open_access_parent_protect_segment(MemState &state, Address addr);
 void close_access_parent_protect_segment(MemState &state, Address addr);
 void add_external_mapping(MemState &mem, Address addr, uint32_t size, uint8_t *addr_ptr);

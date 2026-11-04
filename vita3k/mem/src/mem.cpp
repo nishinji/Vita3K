@@ -26,6 +26,7 @@
 #include <cstring>
 #include <mutex>
 #include <utility>
+#include <vector>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -275,7 +276,7 @@ bool handle_access_violation(MemState &state, uint8_t *addr, bool write) noexcep
     const uintptr_t fault_addr = reinterpret_cast<uintptr_t>(addr);
 
     Address vaddr = 0;
-    const std::unique_lock<std::mutex> lock(state.protect_mutex);
+    std::unique_lock<std::mutex> lock(state.protect_mutex);
     if (fault_addr < memory_addr || fault_addr >= memory_addr + TOTAL_MEM_SIZE) {
         if (state.use_page_table) {
             // this may come from an external mapping
@@ -317,17 +318,25 @@ bool handle_access_violation(MemState &state, uint8_t *addr, bool write) noexcep
     }
 
     Address previous_beg = it->first;
+    std::vector<ProtectResolveCallback> resolves;
     for (auto &[block_addr, block] : info.blocks) {
         block.callback(vaddr, write);
+        if (block.resolve)
+            resolves.push_back(std::move(block.resolve));
     }
 
     unprotect_inner(state, it->first, info.size);
     state.protect_tree.erase(it);
 
+    // The memory is accessible now, so what the resolve callbacks wait for can write to it
+    lock.unlock();
+    for (const ProtectResolveCallback &resolve : resolves)
+        resolve(vaddr, write);
+
     return true;
 }
 
-bool add_protect(MemState &state, Address addr, const uint32_t size, const MemPerm perm, const ProtectCallback &callback) {
+bool add_protect(MemState &state, Address addr, const uint32_t size, const MemPerm perm, const ProtectCallback &callback, const ProtectResolveCallback &resolve) {
     const std::lock_guard<std::mutex> lock(state.protect_mutex);
     ProtectSegmentInfo protect(size, perm);
     align_to_page(state, addr, protect.size);
@@ -335,6 +344,7 @@ bool add_protect(MemState &state, Address addr, const uint32_t size, const MemPe
     ProtectBlockInfo block;
     block.size = size;
     block.callback = callback;
+    block.resolve = resolve;
 
     protect.blocks.emplace(addr, std::move(block));
 
