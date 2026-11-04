@@ -128,7 +128,6 @@ static void ensure_surface_sync_buffer(vkutil::Buffer &buffer, vkutil::DestroyQu
 static void protect_surface(VKState &state, MemState &mem, ColorSurfaceCacheInfo &info) {
     const bool trap_reads = (info.tiling == SurfaceTiling::Linear
         && format_support_surface_sync(info.format));
-    LOG_INFO("DEBUG protect {} size {} trap reads {}", log_hex(info.data.address()), info.total_bytes, trap_reads);
 
     uint32_t addr_start = align(info.data.address(), KiB(4));
     uint32_t addr_end = align_down(info.data.address() + info.total_bytes, KiB(4));
@@ -153,7 +152,6 @@ static void protect_surface(VKState &state, MemState &mem, ColorSurfaceCacheInfo
     ProtectResolveCallback resolve;
     if (need_sync) {
         resolve = [&state, need_sync, surface_address](Address, bool write) {
-            LOG_INFO("DEBUG resolve {} write {}", log_hex(surface_address), write);
             if (!write)
                 renderer::sync_surface_for_cpu_read(state, surface_address);
             *need_sync = true;
@@ -466,7 +464,6 @@ SurfaceRetrieveResult VKSurfaceCache::retrieve_color_surface_for_framebuffer(Mem
     info_added.need_surface_sync = std::make_shared<bool>(false);
     info_added.dirty = std::make_shared<bool>(false);
 
-    LOG_INFO("DEBUG new surface {} can mprotect {}", log_hex(info_added.data.address()), can_mprotect_mapped_memory);
     // we only support surface sync of linear surfaces for now
     if (!can_mprotect_mapped_memory) {
         // perform surface sync on everything
@@ -1237,17 +1234,14 @@ bool VKSurfaceCache::check_for_surface(MemState &mem, Address source_address, Ca
 
     // for now, only look if the address matches exactly a color surface
     auto it = color_address_lookup.find(source_address);
-    if (it == color_address_lookup.end()) {
-        LOG_INFO("DEBUG check_for_surface {}: no surface", log_hex(source_address));
+    if (it == color_address_lookup.end())
         return false;
-    }
 
     auto &surface = *it->second;
     VKContext &context = *static_cast<VKContext *>(state.context);
     // if the frame is already rendered skip
     // Note: that's not the best behavior but it should be fine
     // also it prevents invalidated surfaces from causing issues
-    LOG_INFO("DEBUG check_for_surface {}: last frame rendered {}, frame {}, need sync {}", log_hex(source_address), surface.last_frame_rendered, context.frame_timestamp, *surface.need_surface_sync);
     if (surface.last_frame_rendered + MAX_FRAMES_RENDERING <= context.frame_timestamp)
         return false;
 

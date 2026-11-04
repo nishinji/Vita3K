@@ -112,7 +112,6 @@ COMMAND(handle_sync_surface_for_cpu_read) {
         };
         pending = dynamic_cast<vulkan::VKState &>(renderer).surface_cache.check_for_surface(mem, address, done, 0);
     }
-    LOG_INFO("DEBUG cpu read sync {}: started {}", log_hex(address), pending);
 
     // Without a sync to wait for, the client doesn't have to wait for anything
     if (!pending)
