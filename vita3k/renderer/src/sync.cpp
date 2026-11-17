@@ -169,11 +169,9 @@ SyncWaitResult wishlist(SceGxmSyncObject *sync_object, const uint32_t timestamp,
 
 void subject_done(SceGxmSyncObject *sync_object, const uint32_t timestamp) {
     assert(sync_object->timestamp_ahead >= timestamp);
-    {
-        std::unique_lock<std::mutex> lock(sync_object->lock);
-        sync_object->timestamp_current = std::max(sync_object->timestamp_current.load(), timestamp);
-    }
-    // maybe notify_one is enough
+    std::unique_lock<std::mutex> lock(sync_object->lock);
+    sync_object->timestamp_current = std::max(sync_object->timestamp_current.load(), timestamp);
+    // notify under the lock, a waiter may free the object as soon as it is released
     sync_object->cond.notify_all();
 }
 

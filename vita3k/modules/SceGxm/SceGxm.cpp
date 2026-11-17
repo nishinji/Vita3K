@@ -4934,7 +4934,13 @@ EXPORT(int, sceGxmSyncObjectDestroy, Ptr<SceGxmSyncObject> syncObject) {
         std::lock_guard<std::mutex> lock(emuenv.gxm.sync_objects_mutex);
         emuenv.gxm.sync_objects.erase(syncObject.get(emuenv.mem));
     }
-    renderer::destroy(syncObject.get(emuenv.mem), *emuenv.renderer);
+    SceGxmSyncObject *sync = syncObject.get(emuenv.mem);
+    {
+        // the renderer may still signal this object for work submitted before
+        const ThreadState::HostWait waiting(*emuenv.kernel.get_thread(thread_id));
+        renderer::wishlist(sync, sync->timestamp_ahead);
+    }
+    renderer::destroy(sync, *emuenv.renderer);
     free(emuenv.mem, syncObject);
 
     return 0;
