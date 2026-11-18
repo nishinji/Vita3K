@@ -102,7 +102,7 @@ void GLSurfaceCache::do_typeless_copy(const GLuint dest_texture, const GLuint so
 
 GLuint GLSurfaceCache::retrieve_color_surface_texture_handle(const State &state, std::uint16_t width, std::uint16_t height, const std::uint32_t pixel_stride,
     const SceGxmColorBaseFormat base_format, Ptr<void> address, SurfaceTextureRetrievePurpose purpose, std::uint32_t &swizzle,
-    std::uint16_t *stored_height, std::uint16_t *stored_width) {
+    std::uint16_t *stored_height, std::uint16_t *stored_width, bool srgb) {
     // Create the key to access the cache struct
     const std::uint64_t key = address.address();
 
@@ -130,6 +130,11 @@ GLuint GLSurfaceCache::retrieve_color_surface_texture_handle(const State &state,
     GLenum surface_internal_format = color::translate_internal_format(base_format);
     GLenum surface_upload_format = color::translate_format(base_format);
     GLenum surface_data_type = color::translate_type(base_format);
+
+    // gamma corrected writes are encoded by the hardware into an sRGB surface
+    const bool write_srgb = purpose == SurfaceTextureRetrievePurpose::WRITING && srgb && support_srgb_decode && surface_internal_format == GL_RGBA8;
+    if (write_srgb)
+        surface_internal_format = GL_SRGB8_ALPHA8;
 
     std::size_t bytes_per_stride = pixel_stride * color::bytes_per_pixel(base_format);
     std::size_t total_surface_size = bytes_per_stride * original_height;
@@ -165,7 +170,7 @@ GLuint GLSurfaceCache::retrieve_color_surface_texture_handle(const State &state,
 
         if (ite->first == key) {
             if (purpose == SurfaceTextureRetrievePurpose::WRITING) {
-                surface_stat_changed = surface_extent_changed || (base_format != info.format);
+                surface_stat_changed = surface_extent_changed || (base_format != info.format) || (write_srgb != info.srgb);
             } else {
                 // If the extent changed but format is not the same, then the probability of it being a cast is high
                 surface_stat_changed = surface_extent_changed && (base_format == info.format);
@@ -196,6 +201,8 @@ GLuint GLSurfaceCache::retrieve_color_surface_texture_handle(const State &state,
             info.format = base_format;
             info.total_bytes = total_surface_size;
             info.flags = 0;
+            if (purpose == SurfaceTextureRetrievePurpose::WRITING)
+                info.srgb = write_srgb;
 
             bool store_rawly = false;
 
@@ -476,6 +483,7 @@ GLuint GLSurfaceCache::retrieve_color_surface_texture_handle(const State &state,
     info_added->data = address;
     info_added->total_bytes = bytes_per_stride * original_height;
     info_added->format = base_format;
+    info_added->srgb = write_srgb;
     info_added->swizzle = swizzle;
     info_added->flags = 0;
     info_added->is_ping_pong_dirty = true;
@@ -606,6 +614,9 @@ GLuint GLSurfaceCache::retrieve_srgb_copy(GLuint texture) {
     glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &width);
     glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &height);
     glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &internal_format);
+    // a surface written with gamma is already stored as sRGB
+    if (internal_format == GL_SRGB8_ALPHA8)
+        return texture;
     if (internal_format != GL_RGBA8) {
         LOG_WARN_ONCE("Trying to use gamma correction with non-compatible surface format {}", log_hex(internal_format));
         return texture;
@@ -641,7 +652,7 @@ GLuint GLSurfaceCache::retrieve_ping_pong_color_surface_texture_handle(Ptr<void>
     if (!info.is_ping_pong_dirty)
         return info.gl_ping_pong_texture[0];
 
-    GLenum surface_internal_format = color::translate_internal_format(info.format);
+    GLenum surface_internal_format = info.srgb ? GL_SRGB8_ALPHA8 : color::translate_internal_format(info.format);
     GLenum surface_upload_format = color::translate_format(info.format);
     GLenum surface_data_type = color::translate_type(info.format);
 
@@ -798,7 +809,7 @@ GLuint GLSurfaceCache::retrieve_framebuffer_handle(const State &state, const Mem
         std::uint32_t swizzle_set = color->colorFormat & SCE_GXM_COLOR_SWIZZLE_MASK;
         color_handle = retrieve_color_surface_texture_handle(state, color->width,
             color->height, color->strideInPixels, gxm::get_base_format(color->colorFormat), color->data,
-            SurfaceTextureRetrievePurpose::WRITING, swizzle_set, stored_height);
+            SurfaceTextureRetrievePurpose::WRITING, swizzle_set, stored_height, nullptr, color->gamma != 0);
     } else {
         color_handle = target->attachments[0];
     }

@@ -381,6 +381,8 @@ void sync_texture(GLState &state, GLContext &context, MemState &mem, std::size_t
 
     if (texture_as_surface != 0) {
         glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(texture_as_surface));
+        if (state.surface_cache.support_srgb_decode)
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SRGB_DECODE_EXT, texture.gamma_mode ? GL_DECODE_EXT : GL_SKIP_DECODE_EXT);
 
         if (only_nearest) {
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);

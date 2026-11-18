@@ -75,6 +75,8 @@ struct GLColorSurfaceCacheInfo : public GLSurfaceCacheInfo {
 
     Ptr<void> data;
     bool is_ping_pong_dirty;
+    // written with gamma correction, stored as sRGB
+    bool srgb = false;
     GLObjectArray<1> gl_texture;
     GLObjectArray<1> gl_ping_pong_texture;
     GLObjectArray<1> gl_expected_read_texture_view;
@@ -124,13 +126,15 @@ private:
     void release_srgb_copies(const GLColorSurfaceCacheInfo &info);
 
 public:
+    bool support_srgb_decode = false;
+
     explicit GLSurfaceCache();
 
     void cleanup();
 
     GLuint retrieve_color_surface_texture_handle(const State &state, std::uint16_t width, std::uint16_t height, const std::uint32_t pixel_stride,
         const SceGxmColorBaseFormat color_format, Ptr<void> address, SurfaceTextureRetrievePurpose purpose, std::uint32_t &swizzle,
-        std::uint16_t *stored_height = nullptr, std::uint16_t *stored_width = nullptr);
+        std::uint16_t *stored_height = nullptr, std::uint16_t *stored_width = nullptr, bool srgb = false);
     GLuint retrieve_ping_pong_color_surface_texture_handle(Ptr<void> address);
     GLuint retrieve_srgb_copy(GLuint texture);
 

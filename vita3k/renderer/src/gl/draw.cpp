@@ -166,6 +166,8 @@ void draw(GLState &renderer, GLContext &context, const FeatureState &features, S
     }
     frag_ublock.writing_mask = context.record.writing_mask;
     frag_ublock.use_raw_image = static_cast<float>(use_raw_image);
+    // must match the format used by the surface cache
+    frag_ublock.is_srgb = (context.record.color_surface.gamma && renderer.surface_cache.support_srgb_decode && surface_format == GL_RGBA8) ? 1.0f : 0.0f;
     frag_ublock.res_multiplier = renderer.res_multiplier;
     const bool has_msaa = context.render_target->multisample_mode;
     const bool has_downscale = context.record.color_surface.downscale;
