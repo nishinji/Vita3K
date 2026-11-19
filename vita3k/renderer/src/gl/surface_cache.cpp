@@ -193,6 +193,8 @@ GLuint GLSurfaceCache::retrieve_color_surface_texture_handle(const State &state,
             // Remake locally to avoid making changes to framebuffer array
             uint16_t prev_width = info.width;
             uint16_t prev_height = info.height;
+            // only the sRGB encoding changed, the stored bytes stay valid
+            const bool keep_content = !surface_extent_changed && (base_format == info.format) && (purpose == SurfaceTextureRetrievePurpose::WRITING);
             info.width = width;
             info.height = height;
             info.original_width = original_width;
@@ -207,7 +209,7 @@ GLuint GLSurfaceCache::retrieve_color_surface_texture_handle(const State &state,
             bool store_rawly = false;
 
             auto remake_and_apply_filters = [&](GLuint bind_texture_id) {
-                if (prev_width <= info.width && prev_height <= info.height && surface_extent_changed) {
+                if (prev_width <= info.width && prev_height <= info.height && (surface_extent_changed || keep_content)) {
                     GLuint temp_texture;
                     glGenTextures(1, &temp_texture);
                     glBindTexture(GL_TEXTURE_2D, temp_texture);
