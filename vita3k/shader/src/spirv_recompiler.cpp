@@ -2187,6 +2187,27 @@ static spv::ImageFormat translate_color_format(const SceGxmColorBaseFormat forma
     case SCE_GXM_COLOR_BASE_FORMAT_F32F32:
         return spv::ImageFormat::ImageFormatRg32f;
 
+    case SCE_GXM_COLOR_BASE_FORMAT_F32:
+        return spv::ImageFormat::ImageFormatR32f;
+
+    case SCE_GXM_COLOR_BASE_FORMAT_F16F16:
+        return spv::ImageFormat::ImageFormatRg16f;
+
+    case SCE_GXM_COLOR_BASE_FORMAT_F16:
+        return spv::ImageFormat::ImageFormatR16f;
+
+    case SCE_GXM_COLOR_BASE_FORMAT_U16U16:
+        return spv::ImageFormat::ImageFormatRg16;
+
+    case SCE_GXM_COLOR_BASE_FORMAT_U16:
+        return spv::ImageFormat::ImageFormatR16;
+
+    case SCE_GXM_COLOR_BASE_FORMAT_U8U8:
+        return spv::ImageFormat::ImageFormatRg8;
+
+    case SCE_GXM_COLOR_BASE_FORMAT_U8:
+        return spv::ImageFormat::ImageFormatR8;
+
     default:
         return spv::ImageFormat::ImageFormatRgba8;
     }
