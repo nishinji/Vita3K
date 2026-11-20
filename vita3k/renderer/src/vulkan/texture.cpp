@@ -99,6 +99,9 @@ void sync_texture(VKContext &context, MemState &mem, std::size_t index, SceGxmTe
         return;
     }
 
+    if (texture::translate_format(base_format) == vk::Format::eUndefined)
+        return;
+
     if (index >= SCE_GXM_MAX_TEXTURE_UNITS) {
         // Vertex textures
         context.shader_hints.vertex_textures[index - SCE_GXM_MAX_TEXTURE_UNITS] = format;
