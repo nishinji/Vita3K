@@ -137,6 +137,7 @@ public:
         std::uint16_t *stored_height = nullptr, std::uint16_t *stored_width = nullptr, bool srgb = false);
     GLuint retrieve_ping_pong_color_surface_texture_handle(Ptr<void> address);
     GLuint retrieve_srgb_copy(GLuint texture);
+    void set_color_surface_srgb(Ptr<void> address, bool srgb);
 
     // We really can't sample this around... The only usage of this function is interally load/store from this texture.
     GLuint retrieve_depth_stencil_texture_handle(const State &state, const MemState &mem, const SceGxmDepthStencilSurface &surface, std::int32_t force_width = -1,

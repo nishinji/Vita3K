@@ -643,6 +643,40 @@ GLuint GLSurfaceCache::retrieve_srgb_copy(GLuint texture) {
     return copy->texture[0];
 }
 
+static void respecify_keeping_content(const GLuint texture, const GLenum internal_format, const GLsizei width, const GLsizei height) {
+    GLint last_texture = 0;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &last_texture);
+
+    GLuint temp_texture;
+    glGenTextures(1, &temp_texture);
+    glBindTexture(GL_TEXTURE_2D, temp_texture);
+    glTexStorage2D(GL_TEXTURE_2D, 1, internal_format, width, height);
+    glCopyImageSubData(texture, GL_TEXTURE_2D, 0, 0, 0, 0, temp_texture, GL_TEXTURE_2D, 0, 0, 0, 0, width, height, 1);
+
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, internal_format, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glCopyImageSubData(temp_texture, GL_TEXTURE_2D, 0, 0, 0, 0, texture, GL_TEXTURE_2D, 0, 0, 0, 0, width, height, 1);
+
+    glDeleteTextures(1, &temp_texture);
+    glBindTexture(GL_TEXTURE_2D, last_texture);
+}
+
+void GLSurfaceCache::set_color_surface_srgb(Ptr<void> address, bool srgb) {
+    const auto ite = color_surface_textures.find(address.address());
+    if (ite == color_surface_textures.end())
+        return;
+
+    GLColorSurfaceCacheInfo &info = *ite->second;
+    if (info.srgb == srgb || info.format != SCE_GXM_COLOR_BASE_FORMAT_U8U8U8U8)
+        return;
+
+    info.srgb = srgb;
+    const GLenum internal_format = srgb ? GL_SRGB8_ALPHA8 : GL_RGBA8;
+    respecify_keeping_content(info.gl_texture[0], internal_format, info.width, info.height);
+    if (info.gl_ping_pong_texture[0])
+        respecify_keeping_content(info.gl_ping_pong_texture[0], internal_format, info.width, info.height);
+}
+
 GLuint GLSurfaceCache::retrieve_ping_pong_color_surface_texture_handle(Ptr<void> address) {
     auto ite = color_surface_textures.find(address.address());
     if (ite == color_surface_textures.end()) {
