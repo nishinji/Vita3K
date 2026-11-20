@@ -57,6 +57,9 @@ struct GLState : public renderer::State {
     void done_current() override;
     std::vector<uint32_t> dump_frame(DisplayState &display, uint32_t &width, uint32_t &height) override;
 
+    uint32_t get_features_mask() override {
+        return features.support_zero_to_one_depth ? 1 : 0;
+    }
     int get_supported_filters() override;
     void set_screen_filter(const std::string_view &filter) override;
     int get_max_anisotropic_filtering() override;

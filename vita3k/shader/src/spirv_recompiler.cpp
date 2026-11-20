@@ -1865,7 +1865,7 @@ static spv::Function *make_vert_finalize_function(spv::Builder &b, const SpirvSh
                     // z values below 0 get clamped
                     z = b.createBuiltinCall(f32, utils.std_builtins, GLSLstd450FMax, { z, zero });
 
-                    if (!translation_state.is_vulkan) {
+                    if (!translation_state.is_vulkan && !features.support_zero_to_one_depth) {
                         // convert [0,1] depth range (gxp, vulkan) to [-1,1] depth range (opengl)
                         z = b.createBinOp(spv::OpFMul, f32, z, b.makeFloatConstant(2.0f));
                         z = b.createBinOp(spv::OpFAdd, f32, z, b.makeFloatConstant(-1.0f));

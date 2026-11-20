@@ -208,7 +208,10 @@ bool create(std::unique_ptr<State> &state, const Config &config) {
         { "GL_EXT_shader_framebuffer_fetch", &gl_state.features.direct_fragcolor },
         { "GL_ARB_gl_spirv", &gl_state.features.spirv_shader },
         { "GL_ARB_get_texture_sub_image", &gl_state.features.support_get_texture_sub_image },
-        { "GL_EXT_shader_image_load_formatted", &gl_state.features.support_unknown_format }
+        { "GL_EXT_shader_image_load_formatted", &gl_state.features.support_unknown_format },
+#ifndef __ANDROID__
+        { "GL_ARB_clip_control", &gl_state.features.support_zero_to_one_depth },
+#endif
     };
 
     for (int i = 0; i < total_extensions; i++) {
@@ -220,6 +223,14 @@ bool create(std::unique_ptr<State> &state, const Config &config) {
             check_extensions.erase(find_result);
         }
     }
+
+#ifndef __ANDROID__
+    // Depth clamped to 0 must stay exactly 0, which the [-1,1] remap in the shader does not guarantee
+    if (gl_state.features.support_zero_to_one_depth && glClipControl)
+        glClipControl(GL_LOWER_LEFT, GL_ZERO_TO_ONE);
+    else
+        gl_state.features.support_zero_to_one_depth = false;
+#endif
 
     if (gl_state.features.direct_fragcolor) {
         LOG_INFO("Your GPU supports direct access to last fragment color. Your performance with programmable blending games will be optimized.");
