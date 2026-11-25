@@ -25,6 +25,7 @@
 #include <util/log.h>
 #include <util/tracy.h>
 
+#include <renderer/gl/state.h>
 #include <renderer/vulkan/state.h>
 
 // keywords.h must be after tracy.h for msvc compiler
@@ -205,6 +206,14 @@ COMMAND(handle_transfer_copy) {
     const SceGxmTransferFormat dst_fmt = images[1].format;
     SceGxmTransferType src_type = helper.pop<SceGxmTransferType>();
     SceGxmTransferType dst_type = helper.pop<SceGxmTransferType>();
+
+    // OpenGL never writes depth buffers to memory, so copy them on the GPU
+    if (renderer.current_backend == Backend::OpenGL && src_type == SCE_GXM_TRANSFER_LINEAR && dst_type == SCE_GXM_TRANSFER_LINEAR
+        && colorKeyMode == SCE_GXM_TRANSFER_COLORKEY_NONE
+        && dynamic_cast<gl::GLState &>(renderer).surface_cache.transfer_depth_stencil(renderer, mem, images[0], images[1])) {
+        delete[] images;
+        return;
+    }
 
     if (src_fmt != dst_fmt) {
         LOG_ERROR_ONCE("Unhandled format conversion from 0x{:0X} to 0x{:0X}", fmt::underlying(src_fmt), fmt::underlying(dst_fmt));

@@ -87,6 +87,9 @@ struct GLDepthStencilSurfaceCacheInfo : public GLSurfaceCacheInfo {
     GLObjectArray<1> gl_texture;
     std::int32_t width;
     std::int32_t height;
+    // memory samples covered by one texel, more than one when an MSAA scene is downscaled
+    std::uint8_t texel_samples_x = 1;
+    std::uint8_t texel_samples_y = 1;
 };
 
 class GLSurfaceCache {
@@ -109,6 +112,7 @@ private:
     void do_typeless_copy(const GLuint dest_texture, const GLuint source_texture, const GLenum dest_internal,
         const GLenum dest_upload_format, const GLenum dest_type, const GLenum source_format, const GLenum source_type,
         const int offset_x, const int offset_y, const int width, const int height, const int dest_width, const int dest_height, const std::size_t total_source_size);
+    GLDepthStencilSurfaceCacheInfo *find_depth_stencil(Address depth_address);
 
 public:
     explicit GLSurfaceCache();
@@ -123,6 +127,8 @@ public:
     // We really can't sample this around... The only usage of this function is interally load/store from this texture.
     GLuint retrieve_depth_stencil_texture_handle(const State &state, const MemState &mem, const SceGxmDepthStencilSurface &surface, std::int32_t force_width = -1,
         std::int32_t force_height = -1, const bool is_reading = false);
+    // returns false if the transfer is not a copy between depth buffers
+    bool transfer_depth_stencil(const State &state, const MemState &mem, const SceGxmTransferImage &src, const SceGxmTransferImage &dst);
     GLuint retrieve_framebuffer_handle(const State &state, const MemState &mem, SceGxmColorSurface *color, SceGxmDepthStencilSurface *depth_stencil,
         GLuint *color_texture_handle = nullptr, GLuint *ds_texture_handle = nullptr,
         std::uint16_t *stored_height = nullptr);

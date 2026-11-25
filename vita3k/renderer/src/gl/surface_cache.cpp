@@ -546,6 +546,15 @@ GLuint GLSurfaceCache::retrieve_ping_pong_color_surface_texture_handle(Ptr<void>
     return info.gl_ping_pong_texture[0];
 }
 
+static void init_depth_stencil_texture(const GLuint texture, const GLsizei width, const GLsizei height) {
+    // a depth buffer loaded before anything was drawn must read as far (1.0), as on Vulkan
+    const std::vector<std::uint32_t> far_depth(static_cast<std::size_t>(width) * height, 0xFFFFFF00);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, width, height, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, far_depth.data());
+    // without mipmaps the texture would be incomplete, which glCopyImageSubData rejects
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+}
+
 GLuint GLSurfaceCache::retrieve_depth_stencil_texture_handle(const State &state, const MemState &mem, const SceGxmDepthStencilSurface &surface, std::int32_t force_width, std::int32_t force_height, const bool is_reading) {
     if (!target) {
         LOG_ERROR("Unable to retrieve Depth Stencil texture with no active render target!");
@@ -582,6 +591,10 @@ GLuint GLSurfaceCache::retrieve_depth_stencil_texture_handle(const State &state,
         }
 
         GLDepthStencilSurfaceCacheInfo &cached_info = depth_stencil_textures[found_index];
+        // a sampled depth buffer holds every MSAA sample, growing it would discard the contents
+        if (is_reading)
+            return cached_info.gl_texture[0];
+
         bool need_remake = false;
         if (cached_info.width < force_width) {
             cached_info.width = force_width;
@@ -593,10 +606,8 @@ GLuint GLSurfaceCache::retrieve_depth_stencil_texture_handle(const State &state,
             need_remake = true;
         }
 
-        if (need_remake) {
-            glBindTexture(GL_TEXTURE_2D, depth_stencil_textures[found_index].gl_texture[0]);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, cached_info.width, cached_info.height, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, nullptr);
-        }
+        if (need_remake)
+            init_depth_stencil_texture(cached_info.gl_texture[0], cached_info.width, cached_info.height);
 
         return depth_stencil_textures[found_index].gl_texture[0];
     }
@@ -654,10 +665,63 @@ GLuint GLSurfaceCache::retrieve_depth_stencil_texture_handle(const State &state,
     depth_stencil_textures[found_index].width = force_width;
     depth_stencil_textures[found_index].height = force_height;
 
-    glBindTexture(GL_TEXTURE_2D, depth_stencil_textures[found_index].gl_texture[0]);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, force_width, force_height, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, nullptr);
+    init_depth_stencil_texture(depth_stencil_textures[found_index].gl_texture[0], force_width, force_height);
 
     return depth_stencil_textures[found_index].gl_texture[0];
+}
+
+GLDepthStencilSurfaceCacheInfo *GLSurfaceCache::find_depth_stencil(Address depth_address) {
+    if (depth_address == 0)
+        return nullptr;
+
+    for (GLDepthStencilSurfaceCacheInfo &info : depth_stencil_textures) {
+        if (!(info.flags & GLSurfaceCacheInfo::FLAG_FREE) && info.surface.depth_data.address() == depth_address)
+            return &info;
+    }
+
+    return nullptr;
+}
+
+static std::uint32_t depth_stencil_bytes_per_sample(const SceGxmDepthStencilFormat format) {
+    switch (format) {
+    case SCE_GXM_DEPTH_STENCIL_FORMAT_S8:
+        return 1;
+    case SCE_GXM_DEPTH_STENCIL_FORMAT_D16:
+        return 2;
+    default:
+        return 4;
+    }
+}
+
+bool GLSurfaceCache::transfer_depth_stencil(const State &state, const MemState &mem, const SceGxmTransferImage &src, const SceGxmTransferImage &dst) {
+    GLDepthStencilSurfaceCacheInfo *src_info = find_depth_stencil(src.address.address());
+    GLDepthStencilSurfaceCacheInfo *dst_info = find_depth_stencil(dst.address.address());
+    if (!src_info || !dst_info || src_info == dst_info)
+        return false;
+
+    // a transfer pixel must cover exactly one texel of each depth buffer, e.g. a 32-bit pixel over two D16 samples of a downscaled 4x MSAA buffer
+    const auto matches_texel = [](const GLDepthStencilSurfaceCacheInfo &info, const SceGxmTransferImage &image) {
+        const std::uint32_t sample_bytes = depth_stencil_bytes_per_sample(info.surface.get_format());
+        const std::uint32_t row_bytes = info.surface.get_stride() * sample_bytes;
+        return gxm::get_bits_per_pixel(image.format) == 8 * sample_bytes * info.texel_samples_x
+            && static_cast<std::uint32_t>(image.stride) == row_bytes * info.texel_samples_y;
+    };
+    if (!matches_texel(*src_info, src) || !matches_texel(*dst_info, dst))
+        return false;
+
+    const float res = state.res_multiplier;
+    const GLint src_x = static_cast<GLint>(src.x * res);
+    const GLint src_y = static_cast<GLint>(src.y * res);
+    const GLint dst_x = static_cast<GLint>(dst.x * res);
+    const GLint dst_y = static_cast<GLint>(dst.y * res);
+    const GLsizei width = std::min({ static_cast<GLsizei>(src.width * res), src_info->width - src_x, dst_info->width - dst_x });
+    const GLsizei height = std::min({ static_cast<GLsizei>(src.height * res), src_info->height - src_y, dst_info->height - dst_y });
+    if (width <= 0 || height <= 0)
+        return true;
+
+    glCopyImageSubData(src_info->gl_texture[0], GL_TEXTURE_2D, 0, src_x, src_y, 0,
+        dst_info->gl_texture[0], GL_TEXTURE_2D, 0, dst_x, dst_y, 0, width, height, 1);
+    return true;
 }
 
 GLuint GLSurfaceCache::retrieve_framebuffer_handle(const State &state, const MemState &mem, SceGxmColorSurface *color, SceGxmDepthStencilSurface *depth_stencil,
@@ -686,6 +750,12 @@ GLuint GLSurfaceCache::retrieve_framebuffer_handle(const State &state, const Mem
 
     if (depth_stencil) {
         ds_handle = retrieve_depth_stencil_texture_handle(state, mem, *depth_stencil);
+        if (GLDepthStencilSurfaceCacheInfo *info = find_depth_stencil(depth_stencil->depth_data.address())) {
+            // without a color surface the scene is treated as downscaled
+            const bool downscaled = target->multisample_mode != SCE_GXM_MULTISAMPLE_NONE && (!color || color->downscale);
+            info->texel_samples_x = (downscaled && target->multisample_mode == SCE_GXM_MULTISAMPLE_4X) ? 2 : 1;
+            info->texel_samples_y = downscaled ? 2 : 1;
+        }
     } else {
         ds_handle = target->attachments[1];
     }
