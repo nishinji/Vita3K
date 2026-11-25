@@ -26,6 +26,7 @@
 #include <vulkan/vulkan_format_traits.hpp>
 
 #include <array>
+#include <cmath>
 #include <util/align.h>
 #include <util/log.h>
 #include <util/vector_utils.h>
@@ -1204,6 +1205,83 @@ Framebuffer &VKSurfaceCache::retrieve_framebuffer_handle(MemState &mem, SceGxmCo
     }
 
     return (framebuffer_array[key] = { fb_standard, fb_interlock, color_result.base_image });
+}
+
+static uint32_t depth_stencil_bytes_per_sample(const SceGxmDepthStencilFormat format) {
+    switch (format) {
+    case SCE_GXM_DEPTH_STENCIL_FORMAT_S8:
+        return 1;
+    case SCE_GXM_DEPTH_STENCIL_FORMAT_D16:
+        return 2;
+    default:
+        return 4;
+    }
+}
+
+bool VKSurfaceCache::transfer_depth_stencil(const SceGxmTransferImage &src, const SceGxmTransferImage &dst) {
+    const auto src_it = depth_address_lookup.find(src.address.address());
+    const auto dst_it = depth_address_lookup.find(dst.address.address());
+    if (src_it == depth_address_lookup.end() || dst_it == depth_address_lookup.end() || src_it->second == dst_it->second)
+        return false;
+
+    // a transfer pixel must cover exactly one texel of each depth buffer, e.g. a 32-bit pixel over two D16 samples of a downscaled 4x MSAA buffer
+    const auto matches_texel = [&](const DepthStencilSurfaceCacheInfo &info, const SceGxmTransferImage &image) {
+        if (!info.texture.image)
+            return false;
+
+        const uint32_t sample_bytes = depth_stencil_bytes_per_sample(info.surface.get_format());
+        const uint32_t texel_x = std::max<uint32_t>(1, std::lround(info.memory_width * state.res_multiplier / info.texture.width));
+        const uint32_t texel_y = std::max<uint32_t>(1, std::lround(info.memory_height * state.res_multiplier / info.texture.height));
+        return gxm::get_bits_per_pixel(image.format) == 8 * sample_bytes * texel_x
+            && static_cast<uint32_t>(image.stride) == info.surface.get_stride() * sample_bytes * texel_y;
+    };
+    if (!matches_texel(*src_it->second, src) || !matches_texel(*dst_it->second, dst))
+        return false;
+
+    pending_depth_transfers.push_back({ src.address.address(), dst.address.address(), src.x, src.y, dst.x, dst.y, src.width, src.height });
+    return true;
+}
+
+void VKSurfaceCache::flush_depth_transfers(vk::CommandBuffer cmd_buffer) {
+    for (const PendingDepthTransfer &transfer : pending_depth_transfers) {
+        const auto src_it = depth_address_lookup.find(transfer.src);
+        const auto dst_it = depth_address_lookup.find(transfer.dst);
+        // the surfaces may have been recycled since the transfer was asked
+        if (src_it == depth_address_lookup.end() || dst_it == depth_address_lookup.end())
+            continue;
+
+        vkutil::Image &src_image = src_it->second->texture;
+        vkutil::Image &dst_image = dst_it->second->texture;
+        if (!src_image.image || !dst_image.image)
+            continue;
+
+        const uint32_t src_x = static_cast<uint32_t>(transfer.src_x * state.res_multiplier);
+        const uint32_t src_y = static_cast<uint32_t>(transfer.src_y * state.res_multiplier);
+        const uint32_t dst_x = static_cast<uint32_t>(transfer.dst_x * state.res_multiplier);
+        const uint32_t dst_y = static_cast<uint32_t>(transfer.dst_y * state.res_multiplier);
+        if (src_x >= src_image.width || src_y >= src_image.height || dst_x >= dst_image.width || dst_y >= dst_image.height)
+            continue;
+
+        vk::ImageSubresourceLayers layers = vkutil::color_subresource_layer;
+        layers.aspectMask = vk::ImageAspectFlagBits::eDepth;
+        const vk::ImageCopy image_copy{
+            .srcSubresource = layers,
+            .srcOffset = { static_cast<int32_t>(src_x), static_cast<int32_t>(src_y), 0 },
+            .dstSubresource = layers,
+            .dstOffset = { static_cast<int32_t>(dst_x), static_cast<int32_t>(dst_y), 0 },
+            .extent = {
+                std::min({ static_cast<uint32_t>(transfer.width * state.res_multiplier), src_image.width - src_x, dst_image.width - dst_x }),
+                std::min({ static_cast<uint32_t>(transfer.height * state.res_multiplier), src_image.height - src_y, dst_image.height - dst_y }),
+                1U }
+        };
+
+        src_image.transition_to(cmd_buffer, vkutil::ImageLayout::TransferSrc, vkutil::ds_subresource_range);
+        dst_image.transition_to(cmd_buffer, vkutil::ImageLayout::TransferDst, vkutil::ds_subresource_range);
+        cmd_buffer.copyImage(src_image.image, vk::ImageLayout::eTransferSrcOptimal, dst_image.image, vk::ImageLayout::eTransferDstOptimal, image_copy);
+        src_image.transition_to(cmd_buffer, vkutil::ImageLayout::DepthStencilReadOnly, vkutil::ds_subresource_range);
+        dst_image.transition_to(cmd_buffer, vkutil::ImageLayout::DepthStencilReadOnly, vkutil::ds_subresource_range);
+    }
+    pending_depth_transfers.clear();
 }
 
 bool VKSurfaceCache::check_for_surface(MemState &mem, Address source_address, CallbackRequestFunction &callback, Address target_address) {

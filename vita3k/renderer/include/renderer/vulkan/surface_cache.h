@@ -183,6 +183,16 @@ private:
     // use a vector instead of a set because expect it to be always quite small
     std::vector<Address> cpu_surfaces_changed;
 
+    // depth copies asked by a transfer, executed at the beginning of the next scene
+    struct PendingDepthTransfer {
+        Address src;
+        Address dst;
+        uint32_t src_x, src_y;
+        uint32_t dst_x, dst_y;
+        uint32_t width, height;
+    };
+    std::vector<PendingDepthTransfer> pending_depth_transfers;
+
     VKRenderTarget *target = nullptr;
     ColorSurfaceCacheInfo *last_written_surface = nullptr;
 
@@ -213,6 +223,11 @@ public:
 
     Framebuffer &retrieve_framebuffer_handle(MemState &mem, SceGxmColorSurface *color, SceGxmDepthStencilSurface *depth_stencil,
         vk::RenderPass standard_render_pass, vk::RenderPass interlock_render_pass, vk::ImageView &color_view, vk::ImageView &ds_view);
+
+    // Queue the copy between two depth buffers asked by a transfer, returns false if it is not one
+    bool transfer_depth_stencil(const SceGxmTransferImage &src, const SceGxmTransferImage &dst);
+    // Record the queued depth copies, cmd_buffer must be outside of a render pass
+    void flush_depth_transfers(vk::CommandBuffer cmd_buffer);
 
     // Check if the address is one of a used surface
     // If it is the case, this function returns true, moves the callback

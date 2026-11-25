@@ -215,6 +215,13 @@ COMMAND(handle_transfer_copy) {
         return;
     }
 
+    if (renderer.current_backend == Backend::Vulkan && src_type == SCE_GXM_TRANSFER_LINEAR && dst_type == SCE_GXM_TRANSFER_LINEAR
+        && colorKeyMode == SCE_GXM_TRANSFER_COLORKEY_NONE
+        && dynamic_cast<vulkan::VKState &>(renderer).surface_cache.transfer_depth_stencil(images[0], images[1])) {
+        delete[] images;
+        return;
+    }
+
     if (src_fmt != dst_fmt) {
         LOG_ERROR_ONCE("Unhandled format conversion from 0x{:0X} to 0x{:0X}", fmt::underlying(src_fmt), fmt::underlying(dst_fmt));
         delete[] images;
