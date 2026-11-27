@@ -25,6 +25,7 @@
 #include <util/align.h>
 
 #include <util/log.h>
+#include <util/precise_sleep.h>
 
 #include <algorithm>
 #include <bit>
@@ -676,16 +677,35 @@ SceInt32 ThreadState::sleep(std::unique_lock<std::mutex> &lock, Deadline deadlin
     const auto ended = [&] { return status != ThreadStatus::waiting; };
     if (deadline == Deadline::max()) {
         cv.wait(lock, ended);
-    } else if (!cv.wait_until(lock, deadline, ended)) {
-        // A delay ends with 0, any other wait with WAIT_TIMEOUT, unless another ender came first
-        // while the lock was dropped
+    } else {
         const bool delay = (wait_target.type & ~SCE_KERNEL_WAITTYPE_CB_BIT) == SCE_KERNEL_WAITTYPE_DELAY;
-        const SceInt32 result = delay ? SCE_KERNEL_OK : SCE_KERNEL_ERROR_WAIT_TIMEOUT;
-        change_wait(lock, [&](Waitable *queue) {
-            if (status == ThreadStatus::waiting)
-                Waitable::wake_one(*this, queue, result);
-        });
-        lock.lock();
+        bool timed_out;
+        if (delay) {
+            // condition variable timeouts can overshoot by 2 ms (Windows), which breaks games pacing frames with delays
+            constexpr auto coarse_margin = std::chrono::milliseconds(2);
+            const bool long_delay = deadline - Deadline::clock::now() >= std::chrono::milliseconds(8);
+            timed_out = !cv.wait_until(lock, deadline - coarse_margin, ended);
+            if (timed_out) {
+                lock.unlock();
+                // only frame pacing needs that accuracy; spinning through polling delays (1 ms in Persona 4 Golden,
+                // 4 ms in Project DIVA F 2nd) would waste a host core
+                util::sleep_until_precise(deadline, long_delay);
+                lock.lock();
+                timed_out = !ended();
+            }
+        } else {
+            timed_out = !cv.wait_until(lock, deadline, ended);
+        }
+        if (timed_out) {
+            // A delay ends with 0, any other wait with WAIT_TIMEOUT, unless another ender came first
+            // while the lock was dropped
+            const SceInt32 result = delay ? SCE_KERNEL_OK : SCE_KERNEL_ERROR_WAIT_TIMEOUT;
+            change_wait(lock, [&](Waitable *queue) {
+                if (status == ThreadStatus::waiting)
+                    Waitable::wake_one(*this, queue, result);
+            });
+            lock.lock();
+        }
     }
     // Before the call writes its result to the registers. A thread something holds goes on to its
     // holds, which keep it from its callbacks and its code.
