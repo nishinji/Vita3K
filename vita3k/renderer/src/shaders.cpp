@@ -115,28 +115,6 @@ void save_shaders_cache_hashs(State &renderer, std::vector<ShadersHash> &shaders
     }
 }
 
-static bool load_shader(const fs::path &shader_name, char **destination, std::size_t &size_read) {
-    std::ifstream is(shader_name, std::ifstream::binary);
-    if (!is) {
-        return false;
-    }
-
-    is.seekg(0, std::ifstream::end);
-    size_read = is.tellg();
-    is.seekg(0);
-
-    if (size_read == 0) {
-        return false;
-    }
-
-    if (destination == nullptr) {
-        return true;
-    }
-
-    is.read(*destination, size_read);
-    return true;
-}
-
 static Sha256Hash get_shader_hash(const SceGxmProgram &program) {
     const Sha256Hash hash_bytes = sha256(&program, program.size);
     return hash_bytes;
@@ -144,15 +122,20 @@ static Sha256Hash get_shader_hash(const SceGxmProgram &program) {
 
 template <typename R>
 static R load_shader_generic(const fs::path &shader_path) {
-    std::size_t read_size = 0;
     R source;
+    std::ifstream is(shader_path, std::ifstream::binary | std::ifstream::ate);
+    if (!is)
+        return source;
 
-    if (load_shader(shader_path, nullptr, read_size)) {
-        source.resize((read_size + sizeof(typename R::value_type) - 1) / sizeof(typename R::value_type));
+    const auto end_pos = is.tellg();
+    if (end_pos <= 0)
+        return source;
 
-        char *dest_pointer = reinterpret_cast<char *>(source.data());
-        load_shader(shader_path, &dest_pointer, read_size);
-    }
+    const std::size_t read_size = static_cast<std::size_t>(end_pos);
+    source.resize((read_size + sizeof(typename R::value_type) - 1) / sizeof(typename R::value_type));
+    is.seekg(0, std::ifstream::beg);
+    if (!is.read(reinterpret_cast<char *>(source.data()), static_cast<std::streamsize>(read_size)))
+        source.clear();
 
     return source;
 }

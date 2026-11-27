@@ -234,6 +234,16 @@ struct State {
     virtual std::string_view get_gpu_name() = 0;
 
     virtual void precompile_shader(const ShadersHash &hash) = 0;
+    virtual void precompile_shaders(const std::vector<ShadersHash> &hashes, const std::function<void(int)> &on_progress) {
+        int done = 0;
+        for (const ShadersHash &hash : hashes) {
+            if (render_abort.load(std::memory_order_relaxed))
+                break;
+            precompile_shader(hash);
+            if (on_progress)
+                on_progress(++done);
+        }
+    }
     virtual void preclose_action() = 0;
 
     virtual ~State() = default;

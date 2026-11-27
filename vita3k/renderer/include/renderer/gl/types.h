@@ -70,6 +70,90 @@ public:
 };
 
 struct GLRenderTarget;
+struct GLVertexProgram;
+
+struct GLVertexAttribDesc {
+    GLuint location;
+    GLint component_count;
+    GLenum type;
+    GLboolean normalized;
+    bool upload_integral;
+    uint16_t stream_index;
+    uint16_t stride;
+    uint32_t offset;
+    GLuint divisor;
+};
+
+struct GLStateCache {
+    bool blend_state_valid = false;
+    bool color_mask_valid = false;
+    bool cull_valid = false;
+    bool depth_func_valid = false;
+    bool depth_mask_valid = false;
+    bool scissor_valid = false;
+    bool viewport_valid = false;
+    bool depth_range_valid = false;
+    bool polygon_mode_valid = false;
+    bool point_line_width_valid = false;
+    bool depth_bias_valid = false;
+
+    bool blend_enabled = false;
+    GLboolean color_mask[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
+    GLenum blend_color_func = GL_FUNC_ADD;
+    GLenum blend_alpha_func = GL_FUNC_ADD;
+    GLenum blend_color_src = GL_ONE;
+    GLenum blend_color_dst = GL_ZERO;
+    GLenum blend_alpha_src = GL_ONE;
+    GLenum blend_alpha_dst = GL_ZERO;
+
+    SceGxmCullMode cull_mode = SCE_GXM_CULL_NONE;
+    GLenum depth_func = GL_LESS;
+    GLboolean depth_mask = GL_TRUE;
+
+    bool scissor_enabled = false;
+    GLint scissor[4] = { 0, 0, 0, 0 };
+    GLint viewport[4] = { 0, 0, 0, 0 };
+
+    GLenum polygon_mode = GL_FILL;
+    GLfloat line_width = 1.0f;
+    int depth_bias_factor = 0;
+    int depth_bias_unit = 0;
+
+    struct StencilFace {
+        bool valid = false;
+        GLenum sfail = GL_KEEP;
+        GLenum dpfail = GL_KEEP;
+        GLenum dppass = GL_KEEP;
+        GLenum func = GL_ALWAYS;
+        GLint ref = 0;
+        GLuint compare_mask = 0xFF;
+        GLuint write_mask = 0xFF;
+    } stencil_front, stencil_back;
+
+    void invalidate() {
+        blend_state_valid = false;
+        color_mask_valid = false;
+        cull_valid = false;
+        depth_func_valid = false;
+        depth_mask_valid = false;
+        scissor_valid = false;
+        viewport_valid = false;
+        depth_range_valid = false;
+        polygon_mode_valid = false;
+        point_line_width_valid = false;
+        depth_bias_valid = false;
+        stencil_front.valid = false;
+        stencil_back.valid = false;
+    }
+};
+
+struct SurfaceTexParamCache {
+    GLint swizzle[4] = { GL_RED, GL_GREEN, GL_BLUE, GL_ALPHA };
+    GLint srgb_decode = 0;
+    bool swizzle_valid = false;
+    bool srgb_valid = false;
+    bool only_nearest = false;
+};
 
 struct GLContext : public renderer::Context {
     GLObjectArray<1> vertex_array;
@@ -88,6 +172,23 @@ struct GLContext : public renderer::Context {
     GLuint current_framebuffer{ 0 };
     GLuint current_color_attachment{ 0 };
     GLuint current_framebuffer_height{ 0 };
+
+    uint64_t bound_vertex_program_id = 0;
+    uint32_t enabled_attrib_mask = 0;
+    uint32_t attrib_divisor_mask = 0;
+    bool element_buffer_bound = false;
+
+    GLuint bound_program = 0;
+    GLuint bound_color_image_tex = 0;
+    GLenum bound_color_image_format = 0;
+    GLuint bound_raw_image_tex = 0;
+    GLuint bound_mask_image_tex = 0;
+    GLuint bound_mask_sampler_tex = 0;
+    std::array<GLuint, SCE_GXM_MAX_TEXTURE_UNITS * 2> bound_samplers{};
+    GLStateCache state_cache;
+    std::unordered_map<GLuint, SurfaceTexParamCache> surface_tex_params;
+    float cached_res_multiplier = -1.0f;
+    float cached_surface_lod = 0.0f;
 
     std::pair<std::uint8_t *, std::size_t> vertex_uniform_buffer_storage_ptr{ nullptr, 0 };
     std::pair<std::uint8_t *, std::size_t> fragment_uniform_buffer_storage_ptr{ nullptr, 0 };
@@ -130,6 +231,13 @@ struct GLFragmentProgram : public renderer::FragmentProgram {
 
 struct GLVertexProgram : public renderer::VertexProgram {
     GLShaderStatics statics;
+    uint64_t id = 0;
+    std::vector<GLVertexAttribDesc> cached_attribs;
+    std::array<GLsizei, SCE_GXM_MAX_VERTEX_STREAMS> stream_strides{};
+    std::array<GLuint, SCE_GXM_MAX_VERTEX_STREAMS> stream_divisors{};
+    uint16_t used_streams_mask = 0;
+    bool attribs_cached = false;
+    bool can_use_attrib_binding = false;
 };
 
 struct GLRenderTarget : public renderer::RenderTarget {

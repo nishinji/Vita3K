@@ -340,11 +340,12 @@ GLuint GLSurfaceCache::retrieve_color_surface_texture_handle(const State &state,
             }
         } else if (purpose != SurfaceTextureRetrievePurpose::WRITING) {
             // If we read and it's still in range
-            if (used_iterator != last_use_color_surface_index.end()) {
-                last_use_color_surface_index.erase(used_iterator);
+            if (last_use_color_surface_index.empty() || last_use_color_surface_index.back() != ite->first) {
+                if (used_iterator != last_use_color_surface_index.end()) {
+                    last_use_color_surface_index.erase(used_iterator);
+                }
+                last_use_color_surface_index.push_back(ite->first);
             }
-
-            last_use_color_surface_index.push_back(ite->first);
 
             if (info.flags & GLSurfaceCacheInfo::FLAG_DIRTY) {
                 // We can't use this texture sadly :( If it uses for writing of course it will be gud gud
@@ -604,13 +605,15 @@ GLuint GLSurfaceCache::retrieve_color_surface_texture_handle(const State &state,
     // Start from zero as Vulkan does: the content of a new texture is undefined, AMD drivers hand out
     // memory that held other data, which reads as NaN in float formats. Uncharted keeps its exposure in
     // a F11F11F10 surface that it updates from its previous value, so one NaN made the screen black for good.
-#ifdef __ANDROID__
-    // GLES has no glClearTexImage, upload zeros (16 bytes covers the largest pixel)
-    const std::vector<std::uint8_t> zeros(static_cast<std::size_t>(width) * height * 16);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, surface_upload_format, surface_data_type, zeros.data());
-#else
-    glClearTexImage(texture_handle_return, 0, surface_upload_format, surface_data_type, nullptr);
+#ifndef __ANDROID__
+    if (glClearTexImage) {
+        glClearTexImage(texture_handle_return, 0, surface_upload_format, surface_data_type, nullptr);
+    } else
 #endif
+    {
+        const std::vector<std::uint8_t> zeros(static_cast<std::size_t>(width) * height * 16);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, surface_upload_format, surface_data_type, zeros.data());
+    }
 
     if (const auto previous = color_surface_textures.find(key); previous != color_surface_textures.end()) {
         // the new surface replaces the one at the same address that it does not fit in

@@ -34,6 +34,7 @@ namespace renderer::gl {
 // Compile program.
 SharedGLObject compile_program(GLState &renderer, GLContext &context, const GxmRecordState &state, const FeatureState &features, const MemState &mem, bool shader_cache, bool spirv, bool maskupdate);
 void pre_compile_program(GLState &renderer, const ShadersHash &hashs);
+void pre_compile_programs(GLState &renderer, const std::vector<ShadersHash> &hashes, const std::function<void(int)> &on_progress);
 
 // Uniforms.
 bool set_uniform_buffer(GLContext &context, const ShaderProgram *program, const bool vertex_shader, const int block_num, const int size, const uint8_t *data);
@@ -55,20 +56,20 @@ void sync_viewport_real(const GLState &state, GLContext &context, const float xO
     const float xScale, const float yScale, const float zScale);
 
 void sync_clipping(const GLState &state, GLContext &context);
-void sync_cull(const GxmRecordState &state);
-void sync_depth_func(const SceGxmDepthFunc func, const bool is_front);
-void sync_depth_write_enable(const SceGxmDepthWriteMode mode, const bool is_front);
+void sync_cull(GLContext &context, const GxmRecordState &state);
+void sync_depth_func(GLContext &context, const SceGxmDepthFunc func, const bool is_front);
+void sync_depth_write_enable(GLContext &context, const SceGxmDepthWriteMode mode, const bool is_front);
 void sync_depth_data(const renderer::GxmRecordState &state);
 void sync_stencil_data(const renderer::GxmRecordState &state, const MemState &mem);
 void sync_depth_stencil_data(const renderer::GxmRecordState &state);
-void sync_stencil_func(const GxmRecordState &state, const bool is_back_stencil);
+void sync_stencil_func(GLContext &context, const GxmRecordState &state, const bool is_back_stencil);
 void sync_mask(const GLState &state, GLContext &context, const MemState &mem);
-void sync_polygon_mode(const SceGxmPolygonMode mode, const bool front);
-void sync_point_line_width(const GLState &state, const std::uint32_t size, const bool front);
-void sync_depth_bias(const int factor, const int unit, const bool front);
-void sync_blending(const GxmRecordState &state, const FeatureState &features, const MemState &mem);
+void sync_polygon_mode(GLContext &context, const SceGxmPolygonMode mode, const bool front);
+void sync_point_line_width(const GLState &state, GLContext &context, const std::uint32_t size, const bool front);
+void sync_depth_bias(GLContext &context, const int factor, const int unit, const bool front);
+void sync_blending(GLContext &context, const GxmRecordState &state, const FeatureState &features, const MemState &mem);
 void sync_texture(GLState &state, GLContext &context, MemState &mem, std::size_t index, SceGxmTexture texture, const Config &config);
-void sync_vertex_streams_and_attributes(GLContext &context, GxmRecordState &state, const MemState &mem);
+void sync_vertex_streams_and_attributes(const GLState &renderer, GLContext &context, GxmRecordState &state, const MemState &mem);
 void bind_fundamental(GLContext &context);
 void clear_previous_uniform_storage(GLContext &context);
 

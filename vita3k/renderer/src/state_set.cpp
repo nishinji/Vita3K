@@ -88,7 +88,7 @@ COMMAND_SET_STATE(program) {
 
         switch (renderer.current_backend) {
         case Backend::OpenGL:
-            gl::sync_blending(render_context->record, renderer.features, mem);
+            gl::sync_blending(*static_cast<gl::GLContext *>(render_context), render_context->record, renderer.features, mem);
             break;
 
         case Backend::Vulkan:
@@ -216,8 +216,8 @@ COMMAND_SET_STATE(viewport) {
         switch (renderer.current_backend) {
         case Backend::OpenGL:
             // We need to sync again state that uses the flip
-            gl::sync_cull(render_context->record);
-            gl::sync_clipping(static_cast<gl::GLState &>(renderer), *reinterpret_cast<gl::GLContext *>(render_context));
+            gl::sync_cull(*static_cast<gl::GLContext *>(render_context), render_context->record);
+            gl::sync_clipping(static_cast<gl::GLState &>(renderer), *static_cast<gl::GLContext *>(render_context));
             break;
 
         case Backend::Vulkan:
@@ -244,7 +244,7 @@ COMMAND_SET_STATE(depth_bias) {
     switch (renderer.current_backend) {
     case Backend::OpenGL:
         if (is_front)
-            gl::sync_depth_bias(factor, unit, is_front);
+            gl::sync_depth_bias(*static_cast<gl::GLContext *>(render_context), factor, unit, is_front);
         break;
 
     case Backend::Vulkan:
@@ -271,7 +271,7 @@ COMMAND_SET_STATE(depth_func) {
 
     switch (renderer.current_backend) {
     case Backend::OpenGL:
-        gl::sync_depth_func(depth_func, is_front);
+        gl::sync_depth_func(*static_cast<gl::GLContext *>(render_context), depth_func, is_front);
         break;
 
     case Backend::Vulkan:
@@ -296,7 +296,7 @@ COMMAND_SET_STATE(depth_write_enable) {
 
     switch (renderer.current_backend) {
     case Backend::OpenGL:
-        gl::sync_depth_write_enable(mode, is_front);
+        gl::sync_depth_write_enable(*static_cast<gl::GLContext *>(render_context), mode, is_front);
         break;
 
     case Backend::Vulkan:
@@ -320,7 +320,7 @@ COMMAND_SET_STATE(polygon_mode) {
 
     switch (renderer.current_backend) {
     case Backend::OpenGL:
-        gl::sync_polygon_mode(mode, is_front);
+        gl::sync_polygon_mode(*static_cast<gl::GLContext *>(render_context), mode, is_front);
         break;
 
     case Backend::Vulkan:
@@ -342,7 +342,7 @@ COMMAND_SET_STATE(point_line_width) {
 
     switch (renderer.current_backend) {
     case Backend::OpenGL:
-        gl::sync_point_line_width(static_cast<gl::GLState &>(renderer), width, is_front);
+        gl::sync_point_line_width(static_cast<gl::GLState &>(renderer), *static_cast<gl::GLContext *>(render_context), width, is_front);
         break;
 
     case Backend::Vulkan:
@@ -382,7 +382,7 @@ COMMAND_SET_STATE(stencil_func) {
 
     switch (renderer.current_backend) {
     case Backend::OpenGL:
-        gl::sync_stencil_func(render_context->record, !is_front);
+        gl::sync_stencil_func(*static_cast<gl::GLContext *>(render_context), render_context->record, !is_front);
         break;
 
     case Backend::Vulkan:
@@ -407,7 +407,7 @@ COMMAND_SET_STATE(stencil_ref) {
 
     switch (renderer.current_backend) {
     case Backend::OpenGL:
-        gl::sync_stencil_func(render_context->record, !is_front);
+        gl::sync_stencil_func(*static_cast<gl::GLContext *>(render_context), render_context->record, !is_front);
         break;
 
     case Backend::Vulkan:
@@ -427,7 +427,7 @@ COMMAND_SET_STATE(texture) {
 
     switch (renderer.current_backend) {
     case Backend::OpenGL:
-        gl::sync_texture(dynamic_cast<gl::GLState &>(renderer), *reinterpret_cast<gl::GLContext *>(render_context), mem, texture_index, texture,
+        gl::sync_texture(static_cast<gl::GLState &>(renderer), *static_cast<gl::GLContext *>(render_context), mem, texture_index, texture,
             config);
         break;
 
@@ -449,8 +449,8 @@ COMMAND_SET_STATE(two_sided) {
 
     switch (renderer.current_backend) {
     case Backend::OpenGL:
-        gl::sync_stencil_func(render_context->record, false);
-        gl::sync_stencil_func(render_context->record, true);
+        gl::sync_stencil_func(*static_cast<gl::GLContext *>(render_context), render_context->record, false);
+        gl::sync_stencil_func(*static_cast<gl::GLContext *>(render_context), render_context->record, true);
         break;
 
     case Backend::Vulkan:
@@ -472,7 +472,7 @@ COMMAND_SET_STATE(cull_mode) {
 
     switch (renderer.current_backend) {
     case Backend::OpenGL:
-        gl::sync_cull(render_context->record);
+        gl::sync_cull(*static_cast<gl::GLContext *>(render_context), render_context->record);
         break;
 
     case Backend::Vulkan:
@@ -533,38 +533,65 @@ COMMAND_SET_STATE(visibility_index) {
 }
 
 COMMAND(handle_set_state) {
-    // TRACY_FUNC_COMMANDS(handle_set_state); All set state commands have tracy so kinda redundant
-    renderer::GXMState gxm_state_to_set = helper.pop<renderer::GXMState>();
-    using StateChangeHandlerFunc = decltype(cmd_set_state_region_clip);
-
-    static const std::map<renderer::GXMState, StateChangeHandlerFunc *> handlers = {
-        { GXMState::RegionClip, cmd_set_state_region_clip },
-        { GXMState::Program, cmd_set_state_program },
-        { GXMState::Viewport, cmd_set_state_viewport },
-        { GXMState::DepthBias, cmd_set_state_depth_bias },
-        { GXMState::DepthFunc, cmd_set_state_depth_func },
-        { GXMState::DepthWriteEnable, cmd_set_state_depth_write_enable },
-        { GXMState::PolygonMode, cmd_set_state_polygon_mode },
-        { GXMState::PointLineWidth, cmd_set_state_point_line_width },
-        { GXMState::StencilFunc, cmd_set_state_stencil_func },
-        { GXMState::Texture, cmd_set_state_texture },
-        { GXMState::StencilRef, cmd_set_state_stencil_ref },
-        { GXMState::TwoSided, cmd_set_state_two_sided },
-        { GXMState::CullMode, cmd_set_state_cull_mode },
-        { GXMState::VertexStream, cmd_set_state_vertex_stream },
-        { GXMState::UniformBuffer, cmd_set_state_uniform_buffer },
-        { GXMState::FragmentProgramEnable, cmd_set_state_fragment_program_enable },
-        { GXMState::VisibilityBuffer, cmd_set_state_visibility_buffer },
-        { GXMState::VisibilityIndex, cmd_set_state_visibility_index }
-    };
-
-    auto result = handlers.find(gxm_state_to_set);
-
-    if (result != handlers.end()) {
-        // LOG_TRACE("State set: {}", (int)gxm_state_to_set);
-        result->second(renderer, mem, config, helper, render_context);
-    } else {
+    const renderer::GXMState gxm_state_to_set = helper.pop<renderer::GXMState>();
+    switch (gxm_state_to_set) {
+    case GXMState::UniformBuffer:
+        cmd_set_state_uniform_buffer(renderer, mem, config, helper, render_context);
+        break;
+    case GXMState::VertexStream:
+        cmd_set_state_vertex_stream(renderer, mem, config, helper, render_context);
+        break;
+    case GXMState::Texture:
+        cmd_set_state_texture(renderer, mem, config, helper, render_context);
+        break;
+    case GXMState::Program:
+        cmd_set_state_program(renderer, mem, config, helper, render_context);
+        break;
+    case GXMState::RegionClip:
+        cmd_set_state_region_clip(renderer, mem, config, helper, render_context);
+        break;
+    case GXMState::Viewport:
+        cmd_set_state_viewport(renderer, mem, config, helper, render_context);
+        break;
+    case GXMState::DepthBias:
+        cmd_set_state_depth_bias(renderer, mem, config, helper, render_context);
+        break;
+    case GXMState::DepthFunc:
+        cmd_set_state_depth_func(renderer, mem, config, helper, render_context);
+        break;
+    case GXMState::DepthWriteEnable:
+        cmd_set_state_depth_write_enable(renderer, mem, config, helper, render_context);
+        break;
+    case GXMState::PolygonMode:
+        cmd_set_state_polygon_mode(renderer, mem, config, helper, render_context);
+        break;
+    case GXMState::PointLineWidth:
+        cmd_set_state_point_line_width(renderer, mem, config, helper, render_context);
+        break;
+    case GXMState::StencilFunc:
+        cmd_set_state_stencil_func(renderer, mem, config, helper, render_context);
+        break;
+    case GXMState::StencilRef:
+        cmd_set_state_stencil_ref(renderer, mem, config, helper, render_context);
+        break;
+    case GXMState::TwoSided:
+        cmd_set_state_two_sided(renderer, mem, config, helper, render_context);
+        break;
+    case GXMState::CullMode:
+        cmd_set_state_cull_mode(renderer, mem, config, helper, render_context);
+        break;
+    case GXMState::FragmentProgramEnable:
+        cmd_set_state_fragment_program_enable(renderer, mem, config, helper, render_context);
+        break;
+    case GXMState::VisibilityBuffer:
+        cmd_set_state_visibility_buffer(renderer, mem, config, helper, render_context);
+        break;
+    case GXMState::VisibilityIndex:
+        cmd_set_state_visibility_index(renderer, mem, config, helper, render_context);
+        break;
+    default:
         LOG_ERROR("Unknown state set command {}", static_cast<uint16_t>(gxm_state_to_set));
+        break;
     }
 }
 } // namespace renderer

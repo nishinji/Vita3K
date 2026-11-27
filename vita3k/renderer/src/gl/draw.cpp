@@ -105,9 +105,13 @@ void draw(GLState &renderer, GLContext &context, const FeatureState &features, S
         recompile_fragment_shaders(renderer, context);
     }
 
+    const SceGxmVertexProgram &gxm_vertex_program = *context.record.vertex_program.get(mem);
+    const auto &vert_hash = gxm_vertex_program.renderer_data->hash;
+    const auto &frag_hash = gxm_fragment_program.renderer_data->hash;
+
     // Trying to cache: the last time vs this time shader pair. Does it different somehow?
     // If it's different, we need to switch. Else just stick to it.
-    if (context.record.vertex_program.get(mem)->renderer_data->hash != context.last_draw_vertex_program_hash || context.record.fragment_program.get(mem)->renderer_data->hash != context.last_draw_fragment_program_hash) {
+    if (vert_hash != context.last_draw_vertex_program_hash || frag_hash != context.last_draw_fragment_program_hash) {
         // Need to recompile!
         SharedGLObject program = gl::compile_program(renderer, context, context.record, features, mem, config.shader_cache, config.spirv_shader, gxm_fragment_program.is_maskupdate);
 
@@ -121,8 +125,8 @@ void draw(GLState &renderer, GLContext &context, const FeatureState &features, S
     }
 
     if (config.log_active_shaders) {
-        const std::string hash_text_f = hex_string(context.record.fragment_program.get(mem)->renderer_data->hash);
-        const std::string hash_text_v = hex_string(context.record.vertex_program.get(mem)->renderer_data->hash);
+        const std::string hash_text_f = hex_string(frag_hash);
+        const std::string hash_text_v = hex_string(vert_hash);
 
         LOG_DEBUG("\nVertex  : {}\nFragment: {}", hash_text_v, hash_text_f);
         LOG_DEBUG(fmt::runtime("Vertex default uniform buffer: {}\n"), spdlog::to_hex(context.ubo_data[0], 16));
@@ -134,7 +138,10 @@ void draw(GLState &renderer, GLContext &context, const FeatureState &features, S
         glGetIntegerv(GL_CURRENT_PROGRAM, reinterpret_cast<GLint *>(&program_id));
     }
 
-    glUseProgram(program_id);
+    if (context.bound_program != program_id) {
+        glUseProgram(program_id);
+        context.bound_program = program_id;
+    }
 
     const bool use_raw_image = renderer.features.preserve_f16_nan_as_u16 && color::is_write_surface_stored_rawly(gxm::get_base_format(context.record.color_surface.colorFormat));
 
@@ -152,30 +159,36 @@ void draw(GLState &renderer, GLContext &context, const FeatureState &features, S
     renderer.surface_cache.refresh_gamma_samplings();
 
     if (fragment_program_gxp.is_frag_color_used() && features.is_programmable_blending_need_to_bind_color_attachment()) {
-        if (both_side_fragment_program_disabled) {
-            // The color mask does not stop image stores, but stores to an unbound image have no effect
-            glBindImageTexture(shader::COLOR_ATTACHMENT_RAW_TEXTURE_SLOT_IMAGE, 0, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA16UI);
-            glBindImageTexture(shader::COLOR_ATTACHMENT_TEXTURE_SLOT_IMAGE, 0, 0, GL_FALSE, 0, GL_READ_WRITE, surface_format);
-        } else if (use_raw_image) {
-            glBindImageTexture(shader::COLOR_ATTACHMENT_RAW_TEXTURE_SLOT_IMAGE, context.current_color_attachment, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA16UI);
-            glBindImageTexture(shader::COLOR_ATTACHMENT_TEXTURE_SLOT_IMAGE, 0, 0, GL_FALSE, 0, GL_READ_WRITE, surface_format);
-        } else {
-            glBindImageTexture(shader::COLOR_ATTACHMENT_RAW_TEXTURE_SLOT_IMAGE, 0, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA16UI);
-            glBindImageTexture(shader::COLOR_ATTACHMENT_TEXTURE_SLOT_IMAGE, context.current_color_attachment, 0, GL_FALSE, 0, GL_READ_WRITE, surface_format);
+        GLuint desired_raw_tex = 0;
+        GLuint desired_color_tex = 0;
+        if (!both_side_fragment_program_disabled) {
+            if (use_raw_image)
+                desired_raw_tex = context.current_color_attachment;
+            else
+                desired_color_tex = context.current_color_attachment;
+        }
+        if (context.bound_raw_image_tex != desired_raw_tex) {
+            glBindImageTexture(shader::COLOR_ATTACHMENT_RAW_TEXTURE_SLOT_IMAGE, desired_raw_tex, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA16UI);
+            context.bound_raw_image_tex = desired_raw_tex;
+        }
+        if (context.bound_color_image_tex != desired_color_tex || (desired_color_tex != 0 && context.bound_color_image_format != surface_format)) {
+            glBindImageTexture(shader::COLOR_ATTACHMENT_TEXTURE_SLOT_IMAGE, desired_color_tex, 0, GL_FALSE, 0, GL_READ_WRITE, surface_format);
+            context.bound_color_image_tex = desired_color_tex;
+            context.bound_color_image_format = surface_format;
         }
     }
 
-    if (renderer.features.use_mask_bit) {
-        // The shader only reads it, but on AMD integrated GPUs a read-only binding does not see the
-        // fast clear done by glClearTexImage in sync_mask: every load returns 0 and all fragments are discarded
-        glBindImageTexture(shader::MASK_TEXTURE_SLOT_IMAGE, context.render_target->masktexture[0], 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA8);
-        // SPIR-V shaders read the mask from this sampler. The setting can change while programs
-        // built with it are cached, so bind it for every draw; GLSL programs do not declare it.
-        // Without that unit glActiveTexture would fail and the mask would replace texture 0.
-        if (renderer.support_mask_sampler) {
+    if (renderer.features.use_mask_bit && renderer.mask_used) {
+        const GLuint mask_tex = context.render_target->masktexture[0];
+        if (context.bound_mask_image_tex != mask_tex) {
+            glBindImageTexture(shader::MASK_TEXTURE_SLOT_IMAGE, mask_tex, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA8);
+            context.bound_mask_image_tex = mask_tex;
+        }
+        if (renderer.support_mask_sampler && context.bound_mask_sampler_tex != mask_tex) {
             glActiveTexture(GL_TEXTURE0 + shader::MASK_TEXTURE_SLOT_SAMPLER);
-            glBindTexture(GL_TEXTURE_2D, context.render_target->masktexture[0]);
+            glBindTexture(GL_TEXTURE_2D, mask_tex);
             glActiveTexture(GL_TEXTURE0);
+            context.bound_mask_sampler_tex = mask_tex;
         }
     }
 
@@ -201,6 +214,7 @@ void draw(GLState &renderer, GLContext &context, const FeatureState &features, S
         frag_ublock.front_disabled = 0.0f;
         frag_ublock.back_disabled = 0.0f;
         glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+        context.state_cache.color_mask_valid = false;
     } else {
         frag_ublock.front_disabled = (context.record.front_side_fragment_program_mode == SCE_GXM_FRAGMENT_PROGRAM_DISABLED) ? 1.0f : 0.0f;
         if (context.record.two_sided == SCE_GXM_TWO_SIDED_DISABLED)
@@ -210,14 +224,17 @@ void draw(GLState &renderer, GLContext &context, const FeatureState &features, S
     }
 
     // nothing can observe the color of this scene, see cmd_handle_draw
-    if (context.record.skip_color_output)
+    if (context.record.skip_color_output) {
         glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+        context.state_cache.color_mask_valid = false;
+    }
 
     if (context.record.is_maskupdate) {
         context.render_target->mask_clear_value = -1;
         // Tests bypassed in maskupdate
         glDisable(GL_DEPTH_TEST);
         glDisable(GL_STENCIL_TEST);
+        context.state_cache.invalidate();
 
         glBindFramebuffer(GL_FRAMEBUFFER, context.render_target->maskbuffer[0]);
     }
@@ -226,7 +243,11 @@ void draw(GLState &renderer, GLContext &context, const FeatureState &features, S
     // must match the format used by the surface cache
     frag_ublock.is_srgb = (context.record.color_surface.gamma && renderer.surface_cache.support_srgb_decode && surface_format == GL_RGBA8) ? 1.0f : 0.0f;
     frag_ublock.res_multiplier = renderer.res_multiplier;
-    frag_ublock.surface_lod = std::log2(renderer.res_multiplier);
+    if (context.cached_res_multiplier != renderer.res_multiplier) {
+        context.cached_res_multiplier = renderer.res_multiplier;
+        context.cached_surface_lod = std::log2(renderer.res_multiplier);
+    }
+    frag_ublock.surface_lod = context.cached_surface_lod;
     const bool has_msaa = context.render_target->multisample_mode;
     const bool has_downscale = context.record.color_surface.downscale;
     if (has_msaa && !has_downscale)
@@ -244,7 +265,7 @@ void draw(GLState &renderer, GLContext &context, const FeatureState &features, S
     }
 
     // Upload vertex stream
-    sync_vertex_streams_and_attributes(context, context.record, mem);
+    sync_vertex_streams_and_attributes(renderer, context, context.record, mem);
 
     GLenum mode = translate_primitive(type);
     const GLenum gl_type = format == SCE_GXM_INDEX_FORMAT_U16 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT;
@@ -269,13 +290,13 @@ void draw(GLState &renderer, GLContext &context, const FeatureState &features, S
             sync_depth_data(context.record);
             sync_stencil_data(context.record, mem);
             // sync_stencil_data writes every stencil bit, restore the write masks
-            sync_stencil_func(context.record, true);
-            sync_stencil_func(context.record, false);
+            sync_stencil_func(context, context.record, true);
+            sync_stencil_func(context, context.record, false);
             glBindFramebuffer(GL_FRAMEBUFFER, context.current_framebuffer);
         }
 
         if (both_side_fragment_program_disabled || context.record.skip_color_output) {
-            sync_blending(context.record, features, mem);
+            sync_blending(context, context.record, features, mem);
         }
     };
 
@@ -305,7 +326,10 @@ void draw(GLState &renderer, GLContext &context, const FeatureState &features, S
     } else {
         std::memcpy(index_gpu_ptr.first, indices, index_buffer_size);
     }
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, context.index_stream_ring_buffer.handle());
+    if (!context.element_buffer_bound) {
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, context.index_stream_ring_buffer.handle());
+        context.element_buffer_bound = true;
+    }
 
     const std::uint32_t used_mipmap_units = static_cast<std::uint32_t>(gxm_fragment_program.renderer_data->textures_used.to_ulong()) & context.self_sampling_mipmap_units;
     if (used_mipmap_units) {
@@ -361,8 +385,8 @@ void draw(GLState &renderer, GLContext &context, const FeatureState &features, S
 
     restore_state();
 
-    context.last_draw_vertex_program_hash = context.record.vertex_program.get(mem)->renderer_data->hash;
-    context.last_draw_fragment_program_hash = context.record.fragment_program.get(mem)->renderer_data->hash;
+    context.last_draw_vertex_program_hash = vert_hash;
+    context.last_draw_fragment_program_hash = frag_hash;
 
     context.vertex_stream_ring_buffer.draw_call_done();
     context.index_stream_ring_buffer.draw_call_done();

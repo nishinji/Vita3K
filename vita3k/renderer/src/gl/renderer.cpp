@@ -17,6 +17,7 @@
 
 #include <renderer/functions.h>
 #include <renderer/profile.h>
+#include <renderer/shaders.h>
 #include <renderer/state.h>
 #include <renderer/types.h>
 
@@ -57,6 +58,7 @@ GLContext::GLContext()
     , fragment_info_uniform_buffer(GL_UNIFORM_BUFFER, MiB(8)) {
     std::memset(&previous_vert_info, 0, sizeof(shader::RenderVertUniformBlock));
     std::memset(&previous_frag_info, 0, sizeof(shader::RenderFragUniformBlock));
+    bound_samplers.fill(0xFFFFFFFFu);
 }
 
 static GLenum translate_blend_func(SceGxmBlendFunc src) {
@@ -204,6 +206,7 @@ bool create(std::unique_ptr<State> &state, const Config &config) {
     int total_extensions = 0;
     glGetIntegerv(GL_NUM_EXTENSIONS, &total_extensions);
 
+    bool support_parallel_shader_compile = false;
     std::unordered_map<std::string, bool *> check_extensions = {
         { "GL_ARB_fragment_shader_interlock", &gl_state.features.support_shader_interlock },
         { "GL_ARB_texture_barrier", &gl_state.features.support_texture_barrier },
@@ -211,7 +214,8 @@ bool create(std::unique_ptr<State> &state, const Config &config) {
         { "GL_ARB_gl_spirv", &gl_state.features.spirv_shader },
         { "GL_ARB_get_texture_sub_image", &gl_state.features.support_get_texture_sub_image },
         { "GL_EXT_shader_image_load_formatted", &gl_state.features.support_unknown_format },
-        { "GL_EXT_texture_sRGB_decode", &gl_state.surface_cache.support_srgb_decode }
+        { "GL_EXT_texture_sRGB_decode", &gl_state.surface_cache.support_srgb_decode },
+        { "GL_ARB_parallel_shader_compile", &support_parallel_shader_compile }
     };
 
     for (int i = 0; i < total_extensions; i++) {
@@ -223,6 +227,17 @@ bool create(std::unique_ptr<State> &state, const Config &config) {
             check_extensions.erase(find_result);
         }
     }
+
+    if (support_parallel_shader_compile) {
+        using PFNGLMAXSHADERCOMPILERTHREADSPROC = void(APIENTRY *)(GLuint);
+        if (auto fn = reinterpret_cast<PFNGLMAXSHADERCOMPILERTHREADSPROC>(s_frame->get_proc_address("glMaxShaderCompilerThreadsARB"))) {
+            fn(0xFFFFFFFFu);
+        }
+    }
+
+#ifndef __ANDROID__
+    gl_state.support_vertex_attrib_binding = glBindVertexBuffer && glVertexAttribFormat && glVertexAttribIFormat && glVertexAttribBinding && glVertexBindingDivisor;
+#endif
 
     if (gl_state.features.direct_fragcolor) {
         LOG_INFO("Your GPU supports direct access to last fragment color. Your performance with programmable blending games will be optimized.");
@@ -371,7 +386,10 @@ bool create(std::unique_ptr<FragmentProgram> &fp, GLState &state, const SceGxmPr
 
 bool create(std::unique_ptr<VertexProgram> &vp, GLState &state, const SceGxmProgram &program) {
     R_PROFILE(__func__);
-    vp = std::make_unique<GLVertexProgram>();
+    static std::atomic<uint64_t> next_vertex_program_id{ 1 };
+    auto gl_vp = std::make_unique<GLVertexProgram>();
+    gl_vp->id = next_vertex_program_id.fetch_add(1, std::memory_order_relaxed);
+    vp = std::move(gl_vp);
 
     return true;
 }
@@ -428,16 +446,17 @@ void set_context(GLState &state, GLContext &context, const MemState &mem, const 
     if (state.features.use_mask_bit)
         sync_mask(state, context, mem);
 
+    context.state_cache.invalidate();
     // TODO: Take request to force load from given memory
     // Sync depth/stencil based on depth stencil surface.
     sync_depth_stencil_data(context.record);
-    sync_depth_func(context.record.front_depth_func, true);
-    sync_depth_func(context.record.back_depth_func, false);
-    sync_depth_write_enable(context.record.front_depth_write_mode, true);
-    sync_depth_write_enable(context.record.back_depth_write_mode, false);
+    sync_depth_func(context, context.record.front_depth_func, true);
+    sync_depth_func(context, context.record.back_depth_func, false);
+    sync_depth_write_enable(context, context.record.front_depth_write_mode, true);
+    sync_depth_write_enable(context, context.record.back_depth_write_mode, false);
 
-    sync_stencil_func(context.record, true);
-    sync_stencil_func(context.record, false);
+    sync_stencil_func(context, context.record, true);
+    sync_stencil_func(context, context.record, false);
 
     if (context.record.region_clip_mode != SCE_GXM_REGION_CLIP_NONE) {
         glEnable(GL_SCISSOR_TEST);
@@ -960,6 +979,21 @@ void GLState::render_frame(DisplayState &display, const GxmState &gxm, MemState 
             vp_pos.x, vp_pos.y, vp_size.x, vp_size.y,
             fb_w, fb_h, default_fbo);
     }
+
+    if (shaders_cache_hashs_dirty) {
+        save_shaders_cache_hashs(*this, shaders_cache_hashs);
+        shaders_cache_hashs_dirty = false;
+    }
+
+    if (context) {
+        auto &gl_context = *reinterpret_cast<GLContext *>(context);
+        gl_context.bound_program = 0;
+        gl_context.bound_mask_sampler_tex = 0;
+        gl_context.bound_samplers.fill(0xFFFFFFFFu);
+        gl_context.element_buffer_bound = false;
+        gl_context.state_cache.invalidate();
+        gl_context.surface_tex_params.clear();
+    }
 }
 
 void GLState::swap_window() {
@@ -1075,9 +1109,22 @@ void GLState::precompile_shader(const ShadersHash &hash) {
     pre_compile_program(*this, hash);
 }
 
-void GLState::preclose_action() {}
+void GLState::precompile_shaders(const std::vector<ShadersHash> &hashes, const std::function<void(int)> &on_progress) {
+    pre_compile_programs(*this, hashes, on_progress);
+}
+
+void GLState::preclose_action() {
+    if (shaders_cache_hashs_dirty) {
+        save_shaders_cache_hashs(*this, shaders_cache_hashs);
+        shaders_cache_hashs_dirty = false;
+    }
+}
 
 void GLState::cleanup() {
+    if (shaders_cache_hashs_dirty) {
+        save_shaders_cache_hashs(*this, shaders_cache_hashs);
+        shaders_cache_hashs_dirty = false;
+    }
     set_current();
 
     context = nullptr;

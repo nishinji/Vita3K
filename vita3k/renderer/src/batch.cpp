@@ -106,31 +106,6 @@ static void process_batch(renderer::State &state, const FeatureState &features, 
     }
 #endif
 
-    using CommandHandlerFunc = decltype(cmd_handle_set_context);
-
-    const static std::map<CommandOpcode, CommandHandlerFunc *> handlers = {
-        { CommandOpcode::SetContext, cmd_handle_set_context },
-        { CommandOpcode::SyncSurfaceData, cmd_handle_sync_surface_data },
-        { CommandOpcode::MidSceneFlush, cmd_handle_mid_scene_flush },
-        { CommandOpcode::CreateContext, cmd_handle_create_context },
-        { CommandOpcode::CreateRenderTarget, cmd_handle_create_render_target },
-        { CommandOpcode::MemoryMap, cmd_handle_memory_map },
-        { CommandOpcode::MemoryUnmap, cmd_handle_memory_unmap },
-        { CommandOpcode::Draw, cmd_handle_draw },
-        { CommandOpcode::TransferCopy, cmd_handle_transfer_copy },
-        { CommandOpcode::TransferDownscale, cmd_handle_transfer_downscale },
-        { CommandOpcode::TransferFill, cmd_handle_transfer_fill },
-        { CommandOpcode::Nop, cmd_handle_nop },
-        { CommandOpcode::SetState, cmd_handle_set_state },
-        { CommandOpcode::SignalSyncObject, cmd_handle_signal_sync_object },
-        { CommandOpcode::WaitSyncObject, cmd_handle_wait_sync_object },
-        { CommandOpcode::SignalNotification, cmd_handle_notification },
-        { CommandOpcode::SetScreenFilter, cmd_handle_set_screen_filter },
-        { CommandOpcode::NewFrame, cmd_new_frame },
-        { CommandOpcode::DestroyRenderTarget, cmd_handle_destroy_render_target },
-        { CommandOpcode::DestroyContext, cmd_handle_destroy_context }
-    };
-
     // the guest may have written textures since the previous command list
     state.get_texture_cache()->invalidate_hashes();
 
@@ -152,12 +127,71 @@ static void process_batch(renderer::State &state, const FeatureState &features, 
         if (cmd->opcode != CommandOpcode::Draw && cmd->opcode != CommandOpcode::SetState)
             state.get_texture_cache()->invalidate_hashes();
 
-        auto handler = handlers.find(cmd->opcode);
-        if (handler == handlers.end()) {
+        CommandHelper helper(cmd);
+        switch (cmd->opcode) {
+        case CommandOpcode::Draw:
+            cmd_handle_draw(state, mem, config, helper, features, command_list.context);
+            break;
+        case CommandOpcode::SetState:
+            cmd_handle_set_state(state, mem, config, helper, features, command_list.context);
+            break;
+        case CommandOpcode::SetContext:
+            cmd_handle_set_context(state, mem, config, helper, features, command_list.context);
+            break;
+        case CommandOpcode::SyncSurfaceData:
+            cmd_handle_sync_surface_data(state, mem, config, helper, features, command_list.context);
+            break;
+        case CommandOpcode::MidSceneFlush:
+            cmd_handle_mid_scene_flush(state, mem, config, helper, features, command_list.context);
+            break;
+        case CommandOpcode::CreateContext:
+            cmd_handle_create_context(state, mem, config, helper, features, command_list.context);
+            break;
+        case CommandOpcode::CreateRenderTarget:
+            cmd_handle_create_render_target(state, mem, config, helper, features, command_list.context);
+            break;
+        case CommandOpcode::MemoryMap:
+            cmd_handle_memory_map(state, mem, config, helper, features, command_list.context);
+            break;
+        case CommandOpcode::MemoryUnmap:
+            cmd_handle_memory_unmap(state, mem, config, helper, features, command_list.context);
+            break;
+        case CommandOpcode::TransferCopy:
+            cmd_handle_transfer_copy(state, mem, config, helper, features, command_list.context);
+            break;
+        case CommandOpcode::TransferDownscale:
+            cmd_handle_transfer_downscale(state, mem, config, helper, features, command_list.context);
+            break;
+        case CommandOpcode::TransferFill:
+            cmd_handle_transfer_fill(state, mem, config, helper, features, command_list.context);
+            break;
+        case CommandOpcode::Nop:
+            cmd_handle_nop(state, mem, config, helper, features, command_list.context);
+            break;
+        case CommandOpcode::SignalSyncObject:
+            cmd_handle_signal_sync_object(state, mem, config, helper, features, command_list.context);
+            break;
+        case CommandOpcode::WaitSyncObject:
+            cmd_handle_wait_sync_object(state, mem, config, helper, features, command_list.context);
+            break;
+        case CommandOpcode::SignalNotification:
+            cmd_handle_notification(state, mem, config, helper, features, command_list.context);
+            break;
+        case CommandOpcode::SetScreenFilter:
+            cmd_handle_set_screen_filter(state, mem, config, helper, features, command_list.context);
+            break;
+        case CommandOpcode::NewFrame:
+            cmd_new_frame(state, mem, config, helper, features, command_list.context);
+            break;
+        case CommandOpcode::DestroyRenderTarget:
+            cmd_handle_destroy_render_target(state, mem, config, helper, features, command_list.context);
+            break;
+        case CommandOpcode::DestroyContext:
+            cmd_handle_destroy_context(state, mem, config, helper, features, command_list.context);
+            break;
+        default:
             LOG_ERROR("Unimplemented command opcode {}", static_cast<int>(cmd->opcode));
-        } else {
-            CommandHelper helper(cmd);
-            handler->second(state, mem, config, helper, features, command_list.context);
+            break;
         }
 
         Command *last_cmd = cmd;
@@ -265,20 +299,25 @@ static void render_loop(renderer::State &state, DisplayState &display, GxmState 
 
         const int total = static_cast<int>(state.precompile_queue.size());
         state.precompile_total = total;
+        const auto precompile_start = std::chrono::steady_clock::now();
+        auto last_overlay_update = precompile_start;
 
-        for (int i = 0; i < total && !state.render_abort.load(std::memory_order_relaxed); ++i) {
-            if (!state.set_current())
-                break;
-
-            state.precompile_shader(state.precompile_queue[i]);
-            state.precompile_progress = i + 1;
-
-            if (progress_overlay) {
-                progress_overlay->set_progress(i + 1, total);
-                state.render_frame(display, gxm, mem);
-                state.swap_window();
-            }
+        if (state.set_current()) {
+            state.precompile_shaders(state.precompile_queue, [&](int done) {
+                state.precompile_progress = done;
+                if (progress_overlay) {
+                    const auto now = std::chrono::steady_clock::now();
+                    if (now - last_overlay_update >= std::chrono::milliseconds(50)) {
+                        progress_overlay->set_progress(done, total);
+                        state.render_frame(display, gxm, mem);
+                        state.swap_window();
+                        last_overlay_update = now;
+                    }
+                }
+            });
         }
+        const double precompile_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - precompile_start).count();
+        LOG_INFO("Precompiled {} programs in {:.1f} ms", total, precompile_ms);
 
         state.precompile_queue.clear();
 

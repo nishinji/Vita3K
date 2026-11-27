@@ -23,12 +23,12 @@
 
 namespace renderer::gl {
 bool set_uniform_buffer(GLContext &context, const ShaderProgram *program, const bool vertex_shader, const int block_num, const int size, const uint8_t *data) {
-    auto offset = program->uniform_buffer_data_offsets.at(block_num);
+    const auto offset = program->uniform_buffer_data_offsets[block_num];
     if (offset == static_cast<std::uint32_t>(-1)) {
         return true;
     }
 
-    const size_t data_size_upload = std::min<size_t>(size, program->uniform_buffer_sizes.at(block_num) * 4ull);
+    const size_t data_size_upload = std::min<size_t>(size, program->uniform_buffer_sizes[block_num] * 4ull);
     const size_t offset_start_upload = offset * 4ull;
 
     if (vertex_shader) {

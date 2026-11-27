@@ -80,6 +80,8 @@ struct GLState : public renderer::State {
 
     // Does the context have the texture unit the SPIR-V shaders read the mask from?
     bool support_mask_sampler = false;
+    bool support_vertex_attrib_binding = false;
+    bool shaders_cache_hashs_dirty = false;
 
     std::deque<PendingReadback> pending_readbacks;
     std::vector<ReadbackBuffer> free_readback_buffers;
@@ -109,6 +111,7 @@ struct GLState : public renderer::State {
     std::string_view get_gpu_name() override;
 
     void precompile_shader(const ShadersHash &hash) override;
+    void precompile_shaders(const std::vector<ShadersHash> &hashes, const std::function<void(int)> &on_progress) override;
     void preclose_action() override;
 
     bool has_pending_readbacks() const override {

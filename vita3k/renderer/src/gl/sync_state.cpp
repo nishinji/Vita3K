@@ -31,6 +31,7 @@
 
 #include <shader/spirv_recompiler.h>
 
+#include <bit>
 #include <cmath>
 
 namespace renderer::gl {
@@ -116,28 +117,46 @@ void sync_mask(const GLState &state, GLContext &context, const MemState &mem) {
         return;
     context.render_target->mask_clear_value = initial_byte;
 
-#ifdef __ANDROID__
-    auto width = context.render_target->width;
-    auto height = context.render_target->height;
-    std::vector<GLubyte> emptyData(width * height * 4, initial_byte);
-    GLint texId;
-    glGetIntegerv(GL_TEXTURE_BINDING_2D, &texId);
-    glBindTexture(GL_TEXTURE_2D, context.render_target->masktexture[0]);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, &emptyData[0]);
-    glBindTexture(GL_TEXTURE_2D, texId);
-#else
-    GLubyte clear_bytes[4] = { initial_byte, initial_byte, initial_byte, initial_byte };
-    glClearTexImage(context.render_target->masktexture[0], 0, GL_RGBA, GL_UNSIGNED_BYTE, clear_bytes);
+#ifndef __ANDROID__
+    if (glClearTexImage) {
+        GLubyte clear_bytes[4] = { initial_byte, initial_byte, initial_byte, initial_byte };
+        glClearTexImage(context.render_target->masktexture[0], 0, GL_RGBA, GL_UNSIGNED_BYTE, clear_bytes);
+    } else
 #endif
+    {
+        auto width = context.render_target->width;
+        auto height = context.render_target->height;
+        std::vector<GLubyte> emptyData(width * height * 4, initial_byte);
+        GLint texId;
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &texId);
+        glBindTexture(GL_TEXTURE_2D, context.render_target->masktexture[0]);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, &emptyData[0]);
+        glBindTexture(GL_TEXTURE_2D, texId);
+    }
 }
 
 void sync_viewport_flat(const GLState &state, GLContext &context) {
     const GLsizei display_w = context.record.color_surface.width;
     const GLsizei display_h = context.record.color_surface.height;
 
-    glViewport(0, static_cast<GLint>((context.current_framebuffer_height - display_h) * state.res_multiplier),
-        static_cast<GLsizei>(display_w * state.res_multiplier), static_cast<GLsizei>(display_h * state.res_multiplier));
-    glDepthRange(0, 1);
+    const GLint vx = 0;
+    const GLint vy = static_cast<GLint>((context.current_framebuffer_height - display_h) * state.res_multiplier);
+    const GLsizei vw = static_cast<GLsizei>(display_w * state.res_multiplier);
+    const GLsizei vh = static_cast<GLsizei>(display_h * state.res_multiplier);
+
+    auto &cache = context.state_cache;
+    if (!cache.viewport_valid || cache.viewport[0] != vx || cache.viewport[1] != vy || cache.viewport[2] != vw || cache.viewport[3] != vh) {
+        glViewport(vx, vy, vw, vh);
+        cache.viewport[0] = vx;
+        cache.viewport[1] = vy;
+        cache.viewport[2] = vw;
+        cache.viewport[3] = vh;
+        cache.viewport_valid = true;
+    }
+    if (!cache.depth_range_valid) {
+        glDepthRangef(0.0f, 1.0f);
+        cache.depth_range_valid = true;
+    }
 }
 
 void sync_viewport_real(const GLState &state, GLContext &context, const float xOffset, const float yOffset, const float zOffset,
@@ -150,8 +169,24 @@ void sync_viewport_real(const GLState &state, GLContext &context, const float xO
     const GLfloat x = xOffset - std::abs(xScale);
     const GLfloat y = std::min<GLfloat>(ymin, ymax);
 
-    glViewport(x * state.res_multiplier, y * state.res_multiplier, w * state.res_multiplier, h * state.res_multiplier);
-    glDepthRangef(0.0f, 1.0f);
+    const GLint vx = static_cast<GLint>(x * state.res_multiplier);
+    const GLint vy = static_cast<GLint>(y * state.res_multiplier);
+    const GLsizei vw = static_cast<GLsizei>(w * state.res_multiplier);
+    const GLsizei vh = static_cast<GLsizei>(h * state.res_multiplier);
+
+    auto &cache = context.state_cache;
+    if (!cache.viewport_valid || cache.viewport[0] != vx || cache.viewport[1] != vy || cache.viewport[2] != vw || cache.viewport[3] != vh) {
+        glViewport(vx, vy, vw, vh);
+        cache.viewport[0] = vx;
+        cache.viewport[1] = vy;
+        cache.viewport[2] = vw;
+        cache.viewport[3] = vh;
+        cache.viewport_valid = true;
+    }
+    if (!cache.depth_range_valid) {
+        glDepthRangef(0.0f, 1.0f);
+        cache.depth_range_valid = true;
+    }
 }
 
 void sync_clipping(const GLState &state, GLContext &context) {
@@ -167,52 +202,94 @@ void sync_clipping(const GLState &state, GLContext &context) {
     const GLsizei scissor_w = context.record.region_clip_max.x - context.record.region_clip_min.x + 1;
     const GLsizei scissor_h = context.record.region_clip_max.y - context.record.region_clip_min.y + 1;
 
+    auto &cache = context.state_cache;
+    bool enable = false;
+    GLint sx = 0, sy = 0;
+    GLsizei sw = 0, sh = 0;
+
     switch (context.record.region_clip_mode) {
     case SCE_GXM_REGION_CLIP_NONE:
-        glDisable(GL_SCISSOR_TEST);
+        enable = false;
         break;
     case SCE_GXM_REGION_CLIP_ALL:
-        glEnable(GL_SCISSOR_TEST);
-        glScissor(0, 0, 0, 0);
+        enable = true;
         break;
     case SCE_GXM_REGION_CLIP_OUTSIDE:
-        glEnable(GL_SCISSOR_TEST);
-        glScissor(static_cast<GLint>(scissor_x * state.res_multiplier), static_cast<GLint>(scissor_y * state.res_multiplier),
-            static_cast<GLsizei>(scissor_w * state.res_multiplier), static_cast<GLsizei>(scissor_h * state.res_multiplier));
+        enable = true;
+        sx = static_cast<GLint>(scissor_x * state.res_multiplier);
+        sy = static_cast<GLint>(scissor_y * state.res_multiplier);
+        sw = static_cast<GLsizei>(scissor_w * state.res_multiplier);
+        sh = static_cast<GLsizei>(scissor_h * state.res_multiplier);
         break;
     case SCE_GXM_REGION_CLIP_INSIDE:
-        // TODO: Implement SCE_GXM_REGION_CLIP_INSIDE
-        glDisable(GL_SCISSOR_TEST);
+        enable = false;
         LOG_WARN("Unimplemented region clip mode used: SCE_GXM_REGION_CLIP_INSIDE");
         break;
     }
+
+    if (!cache.scissor_valid || cache.scissor_enabled != enable) {
+        if (enable)
+            glEnable(GL_SCISSOR_TEST);
+        else
+            glDisable(GL_SCISSOR_TEST);
+        cache.scissor_enabled = enable;
+    }
+    if (enable && (!cache.scissor_valid || cache.scissor[0] != sx || cache.scissor[1] != sy || cache.scissor[2] != sw || cache.scissor[3] != sh)) {
+        glScissor(sx, sy, sw, sh);
+        cache.scissor[0] = sx;
+        cache.scissor[1] = sy;
+        cache.scissor[2] = sw;
+        cache.scissor[3] = sh;
+    }
+    cache.scissor_valid = true;
 }
 
-void sync_cull(const GxmRecordState &state) {
-    // Culling.
+void sync_cull(GLContext &context, const GxmRecordState &state) {
+    auto &cache = context.state_cache;
+    if (cache.cull_valid && cache.cull_mode == state.cull_mode)
+        return;
+
     switch (state.cull_mode) {
     case SCE_GXM_CULL_CCW:
-        glEnable(GL_CULL_FACE);
+        if (!cache.cull_valid || cache.cull_mode == SCE_GXM_CULL_NONE)
+            glEnable(GL_CULL_FACE);
         glCullFace(GL_BACK);
         break;
     case SCE_GXM_CULL_CW:
-        glEnable(GL_CULL_FACE);
+        if (!cache.cull_valid || cache.cull_mode == SCE_GXM_CULL_NONE)
+            glEnable(GL_CULL_FACE);
         glCullFace(GL_FRONT);
         break;
     case SCE_GXM_CULL_NONE:
         glDisable(GL_CULL_FACE);
         break;
     }
+    cache.cull_mode = state.cull_mode;
+    cache.cull_valid = true;
 }
 
-void sync_depth_func(const SceGxmDepthFunc func, const bool is_front) {
-    if (is_front)
-        glDepthFunc(translate_depth_func(func));
+void sync_depth_func(GLContext &context, const SceGxmDepthFunc func, const bool is_front) {
+    if (!is_front)
+        return;
+    const GLenum gl_func = translate_depth_func(func);
+    auto &cache = context.state_cache;
+    if (cache.depth_func_valid && cache.depth_func == gl_func)
+        return;
+    glDepthFunc(gl_func);
+    cache.depth_func = gl_func;
+    cache.depth_func_valid = true;
 }
 
-void sync_depth_write_enable(const SceGxmDepthWriteMode mode, const bool is_front) {
-    if (is_front)
-        glDepthMask(mode == SCE_GXM_DEPTH_WRITE_ENABLED ? GL_TRUE : GL_FALSE);
+void sync_depth_write_enable(GLContext &context, const SceGxmDepthWriteMode mode, const bool is_front) {
+    if (!is_front)
+        return;
+    const GLboolean mask = mode == SCE_GXM_DEPTH_WRITE_ENABLED ? GL_TRUE : GL_FALSE;
+    auto &cache = context.state_cache;
+    if (cache.depth_mask_valid && cache.depth_mask == mask)
+        return;
+    glDepthMask(mask);
+    cache.depth_mask = mask;
+    cache.depth_mask_valid = true;
 }
 
 void sync_depth_data(const renderer::GxmRecordState &state) {
@@ -226,7 +303,7 @@ void sync_depth_data(const renderer::GxmRecordState &state) {
     }
 }
 
-void sync_stencil_func(const GxmRecordState &state, const bool is_back_stencil) {
+void sync_stencil_func(GLContext &context, const GxmRecordState &state, const bool is_back_stencil) {
     GLenum face;
     if (state.two_sided == SCE_GXM_TWO_SIDED_DISABLED) {
         // the back state is not used when two sided is disabled
@@ -240,12 +317,47 @@ void sync_stencil_func(const GxmRecordState &state, const bool is_back_stencil) 
     const GxmStencilStateOp &state_op = is_back_stencil ? state.back_stencil_state_op : state.front_stencil_state_op;
     const GxmStencilStateValues &state_vals = is_back_stencil ? state.back_stencil_state_values : state.front_stencil_state_values;
 
-    glStencilOpSeparate(face,
-        translate_stencil_op(state_op.stencil_fail),
-        translate_stencil_op(state_op.depth_fail),
-        translate_stencil_op(state_op.depth_pass));
-    glStencilFuncSeparate(face, translate_stencil_func(state_op.func), state_vals.ref, state_vals.compare_mask);
-    glStencilMaskSeparate(face, state_vals.write_mask);
+    const GLenum sfail = translate_stencil_op(state_op.stencil_fail);
+    const GLenum dpfail = translate_stencil_op(state_op.depth_fail);
+    const GLenum dppass = translate_stencil_op(state_op.depth_pass);
+    const GLenum func = translate_stencil_func(state_op.func);
+    const GLint ref = state_vals.ref;
+    const GLuint cmp_mask = state_vals.compare_mask;
+    const GLuint write_mask = state_vals.write_mask;
+
+    auto &cache = context.state_cache;
+    auto matches = [&](const GLStateCache::StencilFace &f) {
+        return f.valid && f.sfail == sfail && f.dpfail == dpfail && f.dppass == dppass
+            && f.func == func && f.ref == ref && f.compare_mask == cmp_mask && f.write_mask == write_mask;
+    };
+    auto store = [&](GLStateCache::StencilFace &f) {
+        f.valid = true;
+        f.sfail = sfail;
+        f.dpfail = dpfail;
+        f.dppass = dppass;
+        f.func = func;
+        f.ref = ref;
+        f.compare_mask = cmp_mask;
+        f.write_mask = write_mask;
+    };
+
+    if (face == GL_FRONT_AND_BACK) {
+        if (matches(cache.stencil_front) && matches(cache.stencil_back))
+            return;
+        glStencilOpSeparate(face, sfail, dpfail, dppass);
+        glStencilFuncSeparate(face, func, ref, cmp_mask);
+        glStencilMaskSeparate(face, write_mask);
+        store(cache.stencil_front);
+        store(cache.stencil_back);
+    } else {
+        auto &slot = (face == GL_FRONT) ? cache.stencil_front : cache.stencil_back;
+        if (matches(slot))
+            return;
+        glStencilOpSeparate(face, sfail, dpfail, dppass);
+        glStencilFuncSeparate(face, func, ref, cmp_mask);
+        glStencilMaskSeparate(face, write_mask);
+        store(slot);
+    }
 }
 
 void sync_stencil_data(const GxmRecordState &state, const MemState &mem) {
@@ -274,47 +386,64 @@ void sync_depth_stencil_data(const GxmRecordState &state) {
     glClear(GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 }
 
-void sync_polygon_mode(const SceGxmPolygonMode mode, const bool front) {
-    // TODO: Why decap this?
+void sync_polygon_mode(GLContext &context, const SceGxmPolygonMode mode, const bool front) {
     const GLint face = GL_FRONT_AND_BACK;
+    GLenum gl_mode = GL_FILL;
 
-    // Polygon Mode.
     switch (mode) {
     case SCE_GXM_POLYGON_MODE_POINT_10UV:
     case SCE_GXM_POLYGON_MODE_POINT:
     case SCE_GXM_POLYGON_MODE_POINT_01UV:
     case SCE_GXM_POLYGON_MODE_TRIANGLE_POINT:
-        glPolygonMode(face, GL_POINT);
+        gl_mode = GL_POINT;
         break;
     case SCE_GXM_POLYGON_MODE_LINE:
     case SCE_GXM_POLYGON_MODE_TRIANGLE_LINE:
-        glPolygonMode(face, GL_LINE);
+        gl_mode = GL_LINE;
         break;
     case SCE_GXM_POLYGON_MODE_TRIANGLE_FILL:
-        glPolygonMode(face, GL_FILL);
+        gl_mode = GL_FILL;
         break;
     }
+
+    auto &cache = context.state_cache;
+    if (cache.polygon_mode_valid && cache.polygon_mode == gl_mode)
+        return;
+    glPolygonMode(face, gl_mode);
+    cache.polygon_mode = gl_mode;
+    cache.polygon_mode_valid = true;
 }
 
-void sync_point_line_width(const GLState &state, const std::uint32_t width, const bool is_front) {
-    // Point Line Width
-    if (is_front) {
-        glLineWidth(width * state.res_multiplier);
-        glPointSize(width * state.res_multiplier);
-    }
+void sync_point_line_width(const GLState &state, GLContext &context, const std::uint32_t width, const bool is_front) {
+    if (!is_front)
+        return;
+    const GLfloat w = width * state.res_multiplier;
+    auto &cache = context.state_cache;
+    if (cache.point_line_width_valid && cache.line_width == w)
+        return;
+    glLineWidth(w);
+    glPointSize(w);
+    cache.line_width = w;
+    cache.point_line_width_valid = true;
 }
 
-void sync_depth_bias(const int factor, const int unit, const bool is_front) {
-    // Depth Bias
-    if (is_front) {
-        // The offset only applies to the polygon modes it is enabled for
+void sync_depth_bias(GLContext &context, const int factor, const int unit, const bool is_front) {
+    if (!is_front)
+        return;
+    auto &cache = context.state_cache;
+    if (cache.depth_bias_valid && cache.depth_bias_factor == factor && cache.depth_bias_unit == unit)
+        return;
+    if (!cache.depth_bias_valid) {
         glEnable(GL_POLYGON_OFFSET_FILL);
 #ifndef __ANDROID__
         glEnable(GL_POLYGON_OFFSET_LINE);
         glEnable(GL_POLYGON_OFFSET_POINT);
 #endif
-        glPolygonOffset(static_cast<GLfloat>(factor), static_cast<GLfloat>(unit));
     }
+    glPolygonOffset(static_cast<GLfloat>(factor), static_cast<GLfloat>(unit));
+    cache.depth_bias_factor = factor;
+    cache.depth_bias_unit = unit;
+    cache.depth_bias_valid = true;
 }
 
 void sync_texture(GLState &state, GLContext &context, MemState &mem, std::size_t index, SceGxmTexture texture,
@@ -360,7 +489,12 @@ void sync_texture(GLState &state, GLContext &context, MemState &mem, std::size_t
     const bool covers_part_of_target = texture_width <= target.width && texture_height <= target.height
         && (texture_width < target.width || texture_height < target.height);
 
-    if (target.data.address() == data_addr && !covers_part_of_target) {
+    const bool can_be_surface = !gxm::is_bcn_format(base_format)
+        && !renderer::texture::is_astc_format(base_format)
+        && !gxm::is_yuv_format(base_format)
+        && !gxm::is_paletted_format(base_format);
+
+    if (can_be_surface && target.data.address() == data_addr && !covers_part_of_target) {
         texture_as_surface = context.current_color_attachment;
         swizzle_surface = color::translate_swizzle(context.record.color_surface.colorFormat);
 
@@ -377,64 +511,67 @@ void sync_texture(GLState &state, GLContext &context, MemState &mem, std::size_t
 
         vector_utils::push_if_not_exists(context.self_sampling_indices, index);
     } else {
-        vector_utils::erase_first(context.self_sampling_indices, index);
+        if (!context.self_sampling_indices.empty())
+            vector_utils::erase_first(context.self_sampling_indices, index);
         if (index < SCE_GXM_MAX_TEXTURE_UNITS)
             context.self_sampling_mipmap_units &= ~(1U << index);
 
-        SceGxmColorBaseFormat format_target_of_texture;
+        if (can_be_surface) {
+            SceGxmColorBaseFormat format_target_of_texture;
 
-        std::uint16_t width = static_cast<std::uint16_t>(gxm::get_width(texture));
-        std::uint16_t height = static_cast<std::uint16_t>(gxm::get_height(texture));
+            const std::uint16_t width = static_cast<std::uint16_t>(texture_width);
+            const std::uint16_t height = static_cast<std::uint16_t>(texture_height);
 
-        if (renderer::texture::convert_base_texture_format_to_base_color_format(base_format, format_target_of_texture)) {
-            std::uint32_t stride_in_pixels = width;
+            if (renderer::texture::convert_base_texture_format_to_base_color_format(base_format, format_target_of_texture)) {
+                std::uint32_t stride_in_pixels = width;
 
-            switch (texture.texture_type()) {
-            case SCE_GXM_TEXTURE_LINEAR_STRIDED:
-                stride_in_pixels = gxm::get_stride_in_bytes(texture) / ((gxm::bits_per_pixel(base_format) + 7) >> 3);
-                break;
-            case SCE_GXM_TEXTURE_LINEAR:
-                // when the texture is linear, the stride should be aligned to 8 pixels
-                stride_in_pixels = align(stride_in_pixels, 8);
-                break;
-            case SCE_GXM_TEXTURE_TILED:
-                // tiles are 32x32
-                stride_in_pixels = align(stride_in_pixels, 32);
-                break;
-            default:
-                break;
+                switch (texture.texture_type()) {
+                case SCE_GXM_TEXTURE_LINEAR_STRIDED:
+                    stride_in_pixels = gxm::get_stride_in_bytes(texture) / ((gxm::bits_per_pixel(base_format) + 7) >> 3);
+                    break;
+                case SCE_GXM_TEXTURE_LINEAR:
+                    // when the texture is linear, the stride should be aligned to 8 pixels
+                    stride_in_pixels = align(stride_in_pixels, 8);
+                    break;
+                case SCE_GXM_TEXTURE_TILED:
+                    // tiles are 32x32
+                    stride_in_pixels = align(stride_in_pixels, 32);
+                    break;
+                default:
+                    break;
+                }
+
+                std::uint32_t swizz_raw = 0;
+
+                texture_as_surface = state.surface_cache.retrieve_color_surface_texture_handle(
+                    state, width, height, stride_in_pixels, format_target_of_texture, Ptr<void>(data_addr),
+                    SurfaceTextureRetrievePurpose::SAMPLING, swizz_raw, nullptr, nullptr, texture.gamma_mode != 0);
+
+                swizzle_surface = color::translate_swizzle(static_cast<SceGxmColorFormat>(format_target_of_texture | swizz_raw));
+                only_nearest = color::is_write_surface_non_linearity_filtering(format_target_of_texture);
+                filterable_surface = (texture_as_surface != 0) && !only_nearest;
+
+                if (texture_as_surface && texture.gamma_mode) {
+                    const GLuint surface = static_cast<GLuint>(texture_as_surface);
+                    texture_as_surface = state.surface_cache.retrieve_srgb_copy(surface);
+                    if (texture_as_surface == surface)
+                        // stored as sRGB: if a later draw stores it as RGBA8, the unit must still decode
+                        state.surface_cache.set_gamma_sampling(index, surface);
+                    else if (filterable_surface && (state.res_multiplier > 1.0f))
+                        generate_surface_mipmaps(static_cast<GLuint>(texture_as_surface), state.res_multiplier);
+                }
             }
 
-            std::uint32_t swizz_raw = 0;
+            // Try to retrieve S24D8 texture
+            if (!texture_as_surface) {
+                SceGxmDepthStencilSurface lookup_temp;
+                lookup_temp.depth_data = data_addr;
+                lookup_temp.stencil_data.reset();
 
-            texture_as_surface = state.surface_cache.retrieve_color_surface_texture_handle(
-                state, width, height, stride_in_pixels, format_target_of_texture, Ptr<void>(data_addr),
-                SurfaceTextureRetrievePurpose::SAMPLING, swizz_raw, nullptr, nullptr, texture.gamma_mode != 0);
-
-            swizzle_surface = color::translate_swizzle(static_cast<SceGxmColorFormat>(format_target_of_texture | swizz_raw));
-            only_nearest = color::is_write_surface_non_linearity_filtering(format_target_of_texture);
-            filterable_surface = (texture_as_surface != 0) && !only_nearest;
-
-            if (texture_as_surface && texture.gamma_mode) {
-                const GLuint surface = static_cast<GLuint>(texture_as_surface);
-                texture_as_surface = state.surface_cache.retrieve_srgb_copy(surface);
-                if (texture_as_surface == surface)
-                    // stored as sRGB: if a later draw stores it as RGBA8, the unit must still decode
-                    state.surface_cache.set_gamma_sampling(index, surface);
-                else if (filterable_surface && (state.res_multiplier > 1.0f))
-                    generate_surface_mipmaps(static_cast<GLuint>(texture_as_surface), state.res_multiplier);
-            }
-        }
-
-        // Try to retrieve S24D8 texture
-        if (!texture_as_surface) {
-            SceGxmDepthStencilSurface lookup_temp;
-            lookup_temp.depth_data = data_addr;
-            lookup_temp.stencil_data.reset();
-
-            texture_as_surface = state.surface_cache.retrieve_depth_stencil_texture_handle(state, mem, lookup_temp, width, height, true);
-            if (texture_as_surface) {
-                only_nearest = true;
+                texture_as_surface = state.surface_cache.retrieve_depth_stencil_texture_handle(state, mem, lookup_temp, width, height, true);
+                if (texture_as_surface) {
+                    only_nearest = true;
+                }
             }
         }
     }
@@ -462,58 +599,69 @@ void sync_texture(GLState &state, GLContext &context, MemState &mem, std::size_t
         }
         sampler = context.point_surface_samplers[texture.gamma_mode ? 1 : 0];
     }
-    glBindSampler(static_cast<GLuint>(index), sampler);
+    if (context.bound_samplers[index] != sampler) {
+        glBindSampler(static_cast<GLuint>(index), sampler);
+        context.bound_samplers[index] = sampler;
+    }
 
     if (texture_as_surface != 0) {
-        glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(texture_as_surface));
-        if (state.surface_cache.support_srgb_decode)
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SRGB_DECODE_EXT, texture.gamma_mode ? GL_DECODE_EXT : GL_SKIP_DECODE_EXT);
+        const GLuint surf_tex = static_cast<GLuint>(texture_as_surface);
+        glBindTexture(GL_TEXTURE_2D, surf_tex);
+        SurfaceTexParamCache &param_cache = context.surface_tex_params[surf_tex];
 
-        if (only_nearest) {
+        if (state.surface_cache.support_srgb_decode) {
+            const GLint decode = texture.gamma_mode ? GL_DECODE_EXT : GL_SKIP_DECODE_EXT;
+            if (!param_cache.srgb_valid || param_cache.srgb_decode != decode) {
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SRGB_DECODE_EXT, decode);
+                param_cache.srgb_decode = decode;
+                param_cache.srgb_valid = true;
+            }
+        }
+
+        if (only_nearest && !param_cache.only_nearest) {
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            param_cache.only_nearest = true;
         }
 
         if (base_format != SCE_GXM_TEXTURE_BASE_FORMAT_X8U24) {
             const GLint *swizzle = texture::translate_swizzle(format);
 
             if (swizzle) {
+                GLint desired_swizzle[4] = { GL_RED, GL_GREEN, GL_BLUE, GL_ALPHA };
                 if (swizzle_surface) {
                     if (std::memcmp(swizzle_surface, swizzle, 16) != 0) {
-                        // Surface is stored in RGBA in GPU memory, unless in other circumstances. So we must reverse order
                         for (int i = 0; i < 4; i++) {
                             if ((swizzle[i] < GL_RED) || (swizzle[i] > GL_ALPHA)) {
-                                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R + i, swizzle[i]);
+                                desired_swizzle[i] = swizzle[i];
                             } else {
+                                desired_swizzle[i] = GL_RED + i;
                                 for (int j = 0; j < 4; j++) {
                                     if (swizzle[i] == swizzle_surface[j]) {
-                                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R + i, GL_RED + j);
+                                        desired_swizzle[i] = GL_RED + j;
                                         break;
                                     }
                                 }
                             }
                         }
-                    } else {
-                        const GLint default_rgba[4] = { GL_RED, GL_GREEN, GL_BLUE, GL_ALPHA };
-#ifdef __ANDROID__
-                        for (int i = 0; i < 4; i++) {
-                            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R + i, default_rgba[i]);
-                        }
-#else
-                        glTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_RGBA, default_rgba);
-#endif
                     }
                 } else {
                     static bool has_happened = false;
                     LOG_TRACE_IF(!has_happened, "No surface swizzle found, use default texture swizzle");
                     has_happened = true;
+                    std::memcpy(desired_swizzle, swizzle, sizeof(desired_swizzle));
+                }
+
+                if (!param_cache.swizzle_valid || std::memcmp(param_cache.swizzle, desired_swizzle, sizeof(desired_swizzle)) != 0) {
 #ifdef __ANDROID__
                     for (int i = 0; i < 4; i++) {
-                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R + i, swizzle[i]);
+                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R + i, desired_swizzle[i]);
                     }
 #else
-                    glTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_RGBA, swizzle);
+                    glTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_RGBA, desired_swizzle);
 #endif
+                    std::memcpy(param_cache.swizzle, desired_swizzle, sizeof(desired_swizzle));
+                    param_cache.swizzle_valid = true;
                 }
             }
         }
@@ -529,26 +677,64 @@ void sync_texture(GLState &state, GLContext &context, MemState &mem, std::size_t
     glActiveTexture(GL_TEXTURE0);
 }
 
-void sync_blending(const GxmRecordState &state, const FeatureState &features, const MemState &mem) {
+void sync_blending(GLContext &context, const GxmRecordState &state, const FeatureState &features, const MemState &mem) {
     // Blending.
     const SceGxmFragmentProgram &gxm_fragment_program = *state.fragment_program.get(mem);
     const GLFragmentProgram &fragment_program = *reinterpret_cast<GLFragmentProgram *>(
         gxm_fragment_program.renderer_data.get());
 
+    auto &cache = context.state_cache;
+
     if (features.should_use_shader_interlock() && gxm_fragment_program.program.get(mem)->is_frag_color_used()) {
-        // The shader stores the color through an image and has no output, what the color attachment would receive is undefined.
-        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+        if (!cache.color_mask_valid || cache.color_mask[0] != GL_FALSE || cache.color_mask[1] != GL_FALSE
+            || cache.color_mask[2] != GL_FALSE || cache.color_mask[3] != GL_FALSE) {
+            glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+            cache.color_mask[0] = GL_FALSE;
+            cache.color_mask[1] = GL_FALSE;
+            cache.color_mask[2] = GL_FALSE;
+            cache.color_mask[3] = GL_FALSE;
+            cache.color_mask_valid = true;
+        }
         return;
     }
 
-    glColorMask(fragment_program.color_mask_red, fragment_program.color_mask_green, fragment_program.color_mask_blue, fragment_program.color_mask_alpha);
-    if (fragment_program.blend_enabled) {
-        glEnable(GL_BLEND);
-        glBlendEquationSeparate(fragment_program.color_func, fragment_program.alpha_func);
-        glBlendFuncSeparate(fragment_program.color_src, fragment_program.color_dst, fragment_program.alpha_src, fragment_program.alpha_dst);
-    } else {
-        glDisable(GL_BLEND);
+    if (!cache.color_mask_valid || cache.color_mask[0] != fragment_program.color_mask_red
+        || cache.color_mask[1] != fragment_program.color_mask_green
+        || cache.color_mask[2] != fragment_program.color_mask_blue
+        || cache.color_mask[3] != fragment_program.color_mask_alpha) {
+        glColorMask(fragment_program.color_mask_red, fragment_program.color_mask_green, fragment_program.color_mask_blue, fragment_program.color_mask_alpha);
+        cache.color_mask[0] = fragment_program.color_mask_red;
+        cache.color_mask[1] = fragment_program.color_mask_green;
+        cache.color_mask[2] = fragment_program.color_mask_blue;
+        cache.color_mask[3] = fragment_program.color_mask_alpha;
+        cache.color_mask_valid = true;
     }
+
+    if (fragment_program.blend_enabled) {
+        if (!cache.blend_state_valid || !cache.blend_enabled)
+            glEnable(GL_BLEND);
+        if (!cache.blend_state_valid || !cache.blend_enabled
+            || cache.blend_color_func != fragment_program.color_func || cache.blend_alpha_func != fragment_program.alpha_func) {
+            glBlendEquationSeparate(fragment_program.color_func, fragment_program.alpha_func);
+            cache.blend_color_func = fragment_program.color_func;
+            cache.blend_alpha_func = fragment_program.alpha_func;
+        }
+        if (!cache.blend_state_valid || !cache.blend_enabled
+            || cache.blend_color_src != fragment_program.color_src || cache.blend_color_dst != fragment_program.color_dst
+            || cache.blend_alpha_src != fragment_program.alpha_src || cache.blend_alpha_dst != fragment_program.alpha_dst) {
+            glBlendFuncSeparate(fragment_program.color_src, fragment_program.color_dst, fragment_program.alpha_src, fragment_program.alpha_dst);
+            cache.blend_color_src = fragment_program.color_src;
+            cache.blend_color_dst = fragment_program.color_dst;
+            cache.blend_alpha_src = fragment_program.alpha_src;
+            cache.blend_alpha_dst = fragment_program.alpha_dst;
+        }
+        cache.blend_enabled = true;
+    } else {
+        if (!cache.blend_state_valid || cache.blend_enabled)
+            glDisable(GL_BLEND);
+        cache.blend_enabled = false;
+    }
+    cache.blend_state_valid = true;
 }
 
 void clear_previous_uniform_storage(GLContext &context) {
@@ -558,14 +744,94 @@ void clear_previous_uniform_storage(GLContext &context) {
     context.fragment_uniform_buffer_storage_ptr.second = 0;
 }
 
-void sync_vertex_streams_and_attributes(GLContext &context, GxmRecordState &state, const MemState &mem) {
-    // Vertex attributes.
+void sync_vertex_streams_and_attributes(const GLState &renderer, GLContext &context, GxmRecordState &state, const MemState &mem) {
     const SceGxmVertexProgram &vertex_program = *state.vertex_program.get(mem);
     GLVertexProgram *glvert = reinterpret_cast<GLVertexProgram *>(vertex_program.renderer_data.get());
 
-    // Each draw will upload the stream data. Assuming that, we can just bind buffer, upload data
-    // The GXM submit side should already submit used buffer, but we just delete all just in case
-    std::array<std::size_t, SCE_GXM_MAX_VERTEX_STREAMS> offset_in_buffer;
+    if (!glvert->attribs_cached) {
+        glvert->cached_attribs.clear();
+        glvert->used_streams_mask = 0;
+        glvert->stream_strides.fill(0);
+        glvert->stream_divisors.fill(0);
+        glvert->can_use_attrib_binding = true;
+
+        for (const SceGxmVertexAttribute &attribute : vertex_program.attributes) {
+            auto info_it = glvert->attribute_infos.find(attribute.regIndex);
+            if (info_it == glvert->attribute_infos.end())
+                continue;
+
+            const SceGxmVertexStream &stream = vertex_program.streams[attribute.streamIndex];
+            const shader::usse::AttributeInformation &info = info_it->second;
+
+            GLenum type = attribute_format_to_gl_type(attribute.format);
+            const GLboolean normalized = attribute_format_normalized(attribute.format);
+            bool upload_integral = false;
+
+            uint32_t array_size = 1;
+            uint32_t array_element_size = 0;
+            uint8_t component_count = attribute.componentCount;
+
+            if (info.regformat) {
+                component_count = info.component_count;
+                switch (info.gxm_type) {
+                case SCE_GXM_PARAMETER_TYPE_U8:
+                case SCE_GXM_PARAMETER_TYPE_S8:
+                case SCE_GXM_PARAMETER_TYPE_C10:
+                    type = GL_UNSIGNED_BYTE;
+                    break;
+                case SCE_GXM_PARAMETER_TYPE_U16:
+                case SCE_GXM_PARAMETER_TYPE_S16:
+                case SCE_GXM_PARAMETER_TYPE_F16:
+                    type = GL_UNSIGNED_SHORT;
+                    break;
+                default:
+                    type = GL_UNSIGNED_INT;
+                    break;
+                }
+                upload_integral = true;
+
+                if (info.gxm_type == SCE_GXM_PARAMETER_TYPE_C10)
+                    component_count = (component_count * 10 + 7) / 8;
+
+                if (component_count > 4) {
+                    array_size = (component_count + 3) / 4;
+                    array_element_size = 4 * gxm::attribute_format_size(attribute.format);
+                    component_count = 4;
+                }
+            } else {
+                switch (info.gxm_type) {
+                case SCE_GXM_PARAMETER_TYPE_U8:
+                case SCE_GXM_PARAMETER_TYPE_S8:
+                case SCE_GXM_PARAMETER_TYPE_U16:
+                case SCE_GXM_PARAMETER_TYPE_S16:
+                case SCE_GXM_PARAMETER_TYPE_U32:
+                case SCE_GXM_PARAMETER_TYPE_S32:
+                    upload_integral = true;
+                    break;
+                default:
+                    break;
+                }
+            }
+
+            const bool integral = upload_integral || (attribute.format == SCE_GXM_ATTRIBUTE_FORMAT_UNTYPED);
+            const GLuint divisor = gxm::is_stream_instancing(static_cast<SceGxmIndexSource>(stream.indexSource)) ? 1u : 0u;
+            const uint16_t stream_index = attribute.streamIndex;
+            glvert->used_streams_mask |= static_cast<uint16_t>(1u << stream_index);
+            glvert->stream_strides[stream_index] = stream.stride;
+            glvert->stream_divisors[stream_index] = divisor;
+
+            for (uint32_t i = 0; i < array_size; i++) {
+                const uint32_t loc = static_cast<uint32_t>(info.location) + i;
+                const uint32_t offset = i * array_element_size + attribute.offset;
+                if (loc >= 32 || offset > 2047 || stream_index >= SCE_GXM_MAX_VERTEX_STREAMS)
+                    glvert->can_use_attrib_binding = false;
+                glvert->cached_attribs.push_back({ loc, component_count, type, normalized, integral, stream_index, stream.stride, offset, divisor });
+            }
+        }
+        glvert->attribs_cached = true;
+    }
+
+    std::array<std::size_t, SCE_GXM_MAX_VERTEX_STREAMS> offset_in_buffer{};
     for (std::size_t i = 0; i < SCE_GXM_MAX_VERTEX_STREAMS; i++) {
         if (state.vertex_streams[i].data) {
             std::pair<std::uint8_t *, std::size_t> result = context.vertex_stream_ring_buffer.allocate(state.vertex_streams[i].size);
@@ -578,94 +844,87 @@ void sync_vertex_streams_and_attributes(GLContext &context, GxmRecordState &stat
 
             state.vertex_streams[i].data = nullptr;
             state.vertex_streams[i].size = 0;
-        } else {
-            offset_in_buffer[i] = 0;
         }
     }
 
-    glBindBuffer(GL_ARRAY_BUFFER, context.vertex_stream_ring_buffer.handle());
+    const GLuint vbo = context.vertex_stream_ring_buffer.handle();
 
-    for (const SceGxmVertexAttribute &attribute : vertex_program.attributes) {
-        if (!glvert->attribute_infos.contains(attribute.regIndex))
-            continue;
+#ifndef __ANDROID__
+    if (renderer.support_vertex_attrib_binding && glvert->can_use_attrib_binding) {
+        if (context.bound_vertex_program_id != glvert->id) {
+            uint32_t new_enabled_mask = 0;
+            for (const GLVertexAttribDesc &desc : glvert->cached_attribs) {
+                if (desc.upload_integral)
+                    glVertexAttribIFormat(desc.location, desc.component_count, desc.type, desc.offset);
+                else
+                    glVertexAttribFormat(desc.location, desc.component_count, desc.type, desc.normalized, desc.offset);
 
-        const SceGxmVertexStream &stream = vertex_program.streams[attribute.streamIndex];
-
-        GLenum type = attribute_format_to_gl_type(attribute.format);
-        const GLboolean normalized = attribute_format_normalized(attribute.format);
-
-        bool upload_integral = false;
-
-        shader::usse::AttributeInformation info = glvert->attribute_infos.at(attribute.regIndex);
-        int attrib_location = info.location;
-
-        // these 2 values are only used when a matrix is used as a vertex attribute
-        // this is only supported for regformated attribute for now
-        uint32_t array_size = 1;
-        uint32_t array_element_size = 0;
-        uint8_t component_count = attribute.componentCount;
-
-        if (info.regformat) {
-            component_count = info.component_count;
-            switch (info.gxm_type) {
-            case SCE_GXM_PARAMETER_TYPE_U8:
-            case SCE_GXM_PARAMETER_TYPE_S8:
-            case SCE_GXM_PARAMETER_TYPE_C10:
-                type = GL_UNSIGNED_BYTE;
-                break;
-            case SCE_GXM_PARAMETER_TYPE_U16:
-            case SCE_GXM_PARAMETER_TYPE_S16:
-            case SCE_GXM_PARAMETER_TYPE_F16:
-                type = GL_UNSIGNED_SHORT;
-                break;
-            default:
-                // U32 format
-                type = GL_UNSIGNED_INT;
-                break;
+                glVertexAttribBinding(desc.location, desc.stream_index);
+                new_enabled_mask |= (1u << desc.location);
             }
-            upload_integral = true;
 
-            if (info.gxm_type == SCE_GXM_PARAMETER_TYPE_C10)
-                // this is 10-bit and not 8-bit
-                component_count = (component_count * 10 + 7) / 8;
+            uint32_t to_enable = new_enabled_mask & ~context.enabled_attrib_mask;
+            while (to_enable) {
+                const GLuint loc = static_cast<GLuint>(std::countr_zero(to_enable));
+                glEnableVertexAttribArray(loc);
+                to_enable &= to_enable - 1;
+            }
+            uint32_t to_disable = context.enabled_attrib_mask & ~new_enabled_mask;
+            while (to_disable) {
+                const GLuint loc = static_cast<GLuint>(std::countr_zero(to_disable));
+                glDisableVertexAttribArray(loc);
+                to_disable &= to_disable - 1;
+            }
+            context.enabled_attrib_mask = new_enabled_mask;
 
-            if (component_count > 4) {
-                // a matrix is used as an attribute, pack everything into an array of vec4
-                array_size = (component_count + 3) / 4;
-                array_element_size = 4 * gxm::attribute_format_size(attribute.format);
-                component_count = 4;
+            uint16_t stream_mask = glvert->used_streams_mask;
+            while (stream_mask) {
+                const GLuint s = static_cast<GLuint>(std::countr_zero(stream_mask));
+                glVertexBindingDivisor(s, glvert->stream_divisors[s]);
+                stream_mask &= static_cast<uint16_t>(stream_mask - 1);
             }
-        } else {
-            switch (info.gxm_type) {
-            case SCE_GXM_PARAMETER_TYPE_U8:
-            case SCE_GXM_PARAMETER_TYPE_S8:
-            case SCE_GXM_PARAMETER_TYPE_U16:
-            case SCE_GXM_PARAMETER_TYPE_S16:
-            case SCE_GXM_PARAMETER_TYPE_U32:
-            case SCE_GXM_PARAMETER_TYPE_S32:
-                upload_integral = true;
-                break;
-            default:
-                break;
-            }
+
+            context.bound_vertex_program_id = glvert->id;
         }
 
-        const std::uint16_t stream_index = attribute.streamIndex;
+        uint16_t stream_mask = glvert->used_streams_mask;
+        while (stream_mask) {
+            const GLuint s = static_cast<GLuint>(std::countr_zero(stream_mask));
+            glBindVertexBuffer(s, vbo, static_cast<GLintptr>(offset_in_buffer[s]), glvert->stream_strides[s]);
+            stream_mask &= static_cast<uint16_t>(stream_mask - 1);
+        }
+        return;
+    }
+#endif
 
-        for (uint32_t i = 0; i < array_size; i++) {
-            if (upload_integral || (attribute.format == SCE_GXM_ATTRIBUTE_FORMAT_UNTYPED)) {
-                glVertexAttribIPointer(attrib_location + i, component_count, type, stream.stride, reinterpret_cast<const GLvoid *>(i * array_element_size + attribute.offset + offset_in_buffer[stream_index]));
-            } else {
-                glVertexAttribPointer(attrib_location + i, component_count, type, normalized, stream.stride, reinterpret_cast<const GLvoid *>(i * array_element_size + attribute.offset + offset_in_buffer[stream_index]));
+    context.bound_vertex_program_id = 0;
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+
+    for (const GLVertexAttribDesc &desc : glvert->cached_attribs) {
+        const auto ptr = reinterpret_cast<const GLvoid *>(static_cast<std::uintptr_t>(desc.offset + offset_in_buffer[desc.stream_index]));
+        if (desc.upload_integral)
+            glVertexAttribIPointer(desc.location, desc.component_count, desc.type, desc.stride, ptr);
+        else
+            glVertexAttribPointer(desc.location, desc.component_count, desc.type, desc.normalized, desc.stride, ptr);
+
+        if (desc.location < 32) {
+            const uint32_t bit = 1u << desc.location;
+            if (!(context.enabled_attrib_mask & bit)) {
+                glEnableVertexAttribArray(desc.location);
+                context.enabled_attrib_mask |= bit;
             }
-
-            glEnableVertexAttribArray(attrib_location + i);
-
-            if (gxm::is_stream_instancing(static_cast<SceGxmIndexSource>(stream.indexSource))) {
-                glVertexAttribDivisor(attrib_location + i, 1);
-            } else {
-                glVertexAttribDivisor(attrib_location + i, 0);
+            const bool cur_div = (context.attrib_divisor_mask & bit) != 0;
+            const bool want_div = desc.divisor != 0;
+            if (cur_div != want_div) {
+                glVertexAttribDivisor(desc.location, desc.divisor);
+                if (want_div)
+                    context.attrib_divisor_mask |= bit;
+                else
+                    context.attrib_divisor_mask &= ~bit;
             }
+        } else {
+            glEnableVertexAttribArray(desc.location);
+            glVertexAttribDivisor(desc.location, desc.divisor);
         }
     }
     glBindBuffer(GL_ARRAY_BUFFER, 0);
