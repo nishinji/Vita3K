@@ -81,6 +81,16 @@ private:
 
     GLuint m_vao{ 0 };
     GLuint m_vbo{ 0 };
+    GLuint m_last_vao_program{ 0 };
+    GLint m_fxaa_inv_frame_size_loc{ -1 };
+    GLint m_smaa_edge_rt_metrics_loc{ -1 };
+    GLint m_smaa_blend_rt_metrics_loc{ -1 };
+    GLint m_smaa_neighborhood_rt_metrics_loc{ -1 };
+    GLint m_fsr_easu_input_region_loc{ -1 };
+    GLint m_fsr_easu_texture_size_loc{ -1 };
+    GLint m_fsr_easu_output_size_loc{ -1 };
+    GLint m_fsr_rcas_output_origin_loc{ -1 };
+    GLint m_fsr_rcas_sharpness_loc{ -1 };
     SharedGLObject m_render_shader_nofilter;
     SharedGLObject m_render_shader_fxaa;
     SharedGLObject m_render_shader_bicubic;

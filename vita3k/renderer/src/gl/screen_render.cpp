@@ -84,6 +84,7 @@ bool ScreenRenderer::init(const fs::path &static_assets, bool support_srgb_decod
         LOG_CRITICAL("Couldn't compile essential shaders for rendering. Exiting");
         return false;
     }
+    m_fxaa_inv_frame_size_loc = glGetUniformLocation(*m_render_shader_fxaa, "inv_frame_size");
 
     glGenSamplers(1, &m_sampler_linear);
     glSamplerParameteri(m_sampler_linear, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -124,6 +125,7 @@ bool ScreenRenderer::init(const fs::path &static_assets, bool support_srgb_decod
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_buffer_data), vertex_buffer_data, GL_DYNAMIC_DRAW);
 
     setup_vertex_attributes(*m_render_shader_nofilter);
+    m_last_vao_program = *m_render_shader_nofilter;
 
     glClearColor(32.0f / 255.0f, 178.0f / 255.0f, 170.0f / 255.0f, 1.0f);
     glClearDepthf(1.0f);
@@ -177,6 +179,10 @@ bool ScreenRenderer::init_smaa(const fs::path &static_assets) {
         m_smaa_shader_neighborhood.reset();
         return false;
     }
+
+    m_smaa_edge_rt_metrics_loc = glGetUniformLocation(*m_smaa_shader_edge, "rt_metrics");
+    m_smaa_blend_rt_metrics_loc = glGetUniformLocation(*m_smaa_shader_blend, "rt_metrics");
+    m_smaa_neighborhood_rt_metrics_loc = glGetUniformLocation(*m_smaa_shader_neighborhood, "rt_metrics");
 
     // bind each sampler to the texture unit it is given in render_smaa_offscreen / render
     glUseProgram(*m_smaa_shader_blend);
@@ -272,12 +278,12 @@ void ScreenRenderer::render_smaa_offscreen(GLuint texture, const SceFVector2 &te
     glBindVertexArray(m_smaa_vao);
     glBindBuffer(GL_ARRAY_BUFFER, m_smaa_vbo);
 
-    const auto run_pass = [&](GLuint fbo, GLuint program) {
+    const auto run_pass = [&](GLuint fbo, GLuint program, GLint rt_metrics_loc) {
         glBindFramebuffer(GL_FRAMEBUFFER, fbo);
         glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         glUseProgram(program);
-        glUniform4f(glGetUniformLocation(program, "rt_metrics"),
+        glUniform4f(rt_metrics_loc,
             1.0f / texture_size.x, 1.0f / texture_size.y, texture_size.x, texture_size.y);
         setup_vertex_attributes(program);
         glDrawArrays(GL_TRIANGLE_FAN, 0, screen_vertex_count);
@@ -292,7 +298,7 @@ void ScreenRenderer::render_smaa_offscreen(GLuint texture, const SceFVector2 &te
     // pass 1: edge detection, reads the source color
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, texture);
-    run_pass(m_smaa_edges_fbo, *m_smaa_shader_edge);
+    run_pass(m_smaa_edges_fbo, *m_smaa_shader_edge, m_smaa_edge_rt_metrics_loc);
 
     // pass 2: blending weight calculation, reads the edges and both lookup tables
     glBindTexture(GL_TEXTURE_2D, m_smaa_edges_texture);
@@ -300,7 +306,7 @@ void ScreenRenderer::render_smaa_offscreen(GLuint texture, const SceFVector2 &te
     glBindTexture(GL_TEXTURE_2D, m_smaa_area_texture);
     glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, m_smaa_search_texture);
-    run_pass(m_smaa_blend_fbo, *m_smaa_shader_blend);
+    run_pass(m_smaa_blend_fbo, *m_smaa_shader_blend, m_smaa_blend_rt_metrics_loc);
 
     // leave the lookup tables behind, pass 3 needs unit 1 for the blend texture
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -355,6 +361,12 @@ bool ScreenRenderer::init_fsr(const fs::path &static_assets) {
         return false;
     }
 
+    m_fsr_easu_input_region_loc = glGetUniformLocation(*m_fsr_shader_easu, "input_region");
+    m_fsr_easu_texture_size_loc = glGetUniformLocation(*m_fsr_shader_easu, "texture_size");
+    m_fsr_easu_output_size_loc = glGetUniformLocation(*m_fsr_shader_easu, "output_size");
+    m_fsr_rcas_output_origin_loc = glGetUniformLocation(*m_fsr_shader_rcas, "output_origin");
+    m_fsr_rcas_sharpness_loc = glGetUniformLocation(*m_fsr_shader_rcas, "sharpness");
+
     return true;
 }
 
@@ -397,11 +409,11 @@ void ScreenRenderer::render_fsr(const SceFVector2 &viewport_pos, const SceFVecto
     glViewport(0, 0, width, height);
     glUseProgram(*m_fsr_shader_easu);
     setup_vertex_attributes(*m_fsr_shader_easu);
-    glUniform4f(glGetUniformLocation(*m_fsr_shader_easu, "input_region"),
+    glUniform4f(m_fsr_easu_input_region_loc,
         uvs[0] * texture_size.x, uvs[1] * texture_size.y,
         (uvs[2] - uvs[0]) * texture_size.x, (uvs[3] - uvs[1]) * texture_size.y);
-    glUniform2f(glGetUniformLocation(*m_fsr_shader_easu, "texture_size"), texture_size.x, texture_size.y);
-    glUniform2f(glGetUniformLocation(*m_fsr_shader_easu, "output_size"), static_cast<float>(width), static_cast<float>(height));
+    glUniform2f(m_fsr_easu_texture_size_loc, texture_size.x, texture_size.y);
+    glUniform2f(m_fsr_easu_output_size_loc, static_cast<float>(width), static_cast<float>(height));
     glDrawArrays(GL_TRIANGLE_FAN, 0, screen_vertex_count);
 
     // pass 2: sharpen it onto the screen, one to one
@@ -413,9 +425,10 @@ void ScreenRenderer::render_fsr(const SceFVector2 &viewport_pos, const SceFVecto
     glBindSampler(0, m_sampler_nearest);
     glUseProgram(*m_fsr_shader_rcas);
     setup_vertex_attributes(*m_fsr_shader_rcas);
-    glUniform2f(glGetUniformLocation(*m_fsr_shader_rcas, "output_origin"), static_cast<float>(origin_x), static_cast<float>(origin_y));
+    m_last_vao_program = *m_fsr_shader_rcas;
+    glUniform2f(m_fsr_rcas_output_origin_loc, static_cast<float>(origin_x), static_cast<float>(origin_y));
     // in stops, same default as the vulkan backend
-    glUniform1f(glGetUniformLocation(*m_fsr_shader_rcas, "sharpness"), 0.2f);
+    glUniform1f(m_fsr_rcas_sharpness_loc, 0.2f);
     glDrawArrays(GL_TRIANGLE_FAN, 0, screen_vertex_count);
 }
 
@@ -480,14 +493,13 @@ void ScreenRenderer::render(const SceFVector2 &viewport_pos, const SceFVector2 &
 
     // Clear the whole default framebuffer (covers the letterbox area as well).
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClearDepthf(1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    // should not be needed, but just in case
+    glClear(GL_COLOR_BUFFER_BIT);
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 
     const auto &shader = current_shader();
+    const GLuint shader_id = *shader;
 
-    glUseProgram(*shader);
+    glUseProgram(shader_id);
     glBindVertexArray(m_vao);
     glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
 
@@ -523,12 +535,13 @@ void ScreenRenderer::render(const SceFVector2 &viewport_pos, const SceFVector2 &
         last_uvs[2] = uvs[2];
         last_uvs[3] = uvs[3];
 
-        glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_buffer_data), nullptr, GL_DYNAMIC_DRAW);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_buffer_data), vertex_buffer_data, GL_DYNAMIC_DRAW);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertex_buffer_data), vertex_buffer_data);
     }
 
-    setup_vertex_attributes(*shader);
+    if (m_last_vao_program != shader_id) {
+        setup_vertex_attributes(shader_id);
+        m_last_vao_program = shader_id;
+    }
 
     glBindTexture(GL_TEXTURE_2D, texture);
     glBindSampler(0, current_sampler());
@@ -564,8 +577,7 @@ void ScreenRenderer::render(const SceFVector2 &viewport_pos, const SceFVector2 &
         glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        const GLint invScreenLocation = glGetUniformLocation(*shader, "inv_frame_size");
-        glUniform2f(invScreenLocation, 1.0f / texture_size.x, 1.0f / texture_size.y);
+        glUniform2f(m_fxaa_inv_frame_size_loc, 1.0f / texture_size.x, 1.0f / texture_size.y);
 
         glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 
@@ -582,8 +594,7 @@ void ScreenRenderer::render(const SceFVector2 &viewport_pos, const SceFVector2 &
         render_fsr(viewport_pos, viewport_size, uvs, texture_size, default_fbo);
     } else {
         if (m_filter == ScreenFilter::SMAA) {
-            const GLint rt_metrics_location = glGetUniformLocation(*shader, "rt_metrics");
-            glUniform4f(rt_metrics_location, 1 / texture_size.x, 1 / texture_size.y, texture_size.x, texture_size.y);
+            glUniform4f(m_smaa_neighborhood_rt_metrics_loc, 1 / texture_size.x, 1 / texture_size.y, texture_size.x, texture_size.y);
             // the blending weights computed by the offscreen passes cover the whole source,
             // so they are addressed with the same uvs as the color texture
             glActiveTexture(GL_TEXTURE1);
@@ -663,6 +674,7 @@ void ScreenRenderer::destroy() {
 
     glDeleteVertexArrays(1, &m_vao);
     m_vao = 0;
+    m_last_vao_program = 0;
 
     glDeleteTextures(1, &m_screen_texture);
     m_screen_texture = 0;
