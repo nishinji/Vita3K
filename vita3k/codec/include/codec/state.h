@@ -244,6 +244,8 @@ struct AacDecoderState : public DecoderState {
 };
 
 struct PlayerState {
+    // guards the format, the codec contexts and the stream ids against a switch to the next video
+    std::recursive_mutex mutex;
     std::string video_playing;
     std::queue<std::string> videos_queue;
 

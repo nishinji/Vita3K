@@ -39,7 +39,8 @@ static uint64_t to_milliseconds(int64_t time, AVRational time_base) {
 }
 
 uint64_t PlayerState::get_duration_ms(int32_t stream_id) {
-    if (!format || stream_id < 0)
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (!format || stream_id < 0 || static_cast<unsigned>(stream_id) >= format->nb_streams)
         return 0;
     const AVStream *stream = format->streams[stream_id];
     if (stream->duration != AV_NOPTS_VALUE)
@@ -48,13 +49,15 @@ uint64_t PlayerState::get_duration_ms(int32_t stream_id) {
 }
 
 uint64_t PlayerState::get_start_time_ms(int32_t stream_id) {
-    if (!format || stream_id < 0)
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (!format || stream_id < 0 || static_cast<unsigned>(stream_id) >= format->nb_streams)
         return 0;
     const AVStream *stream = format->streams[stream_id];
     return to_milliseconds(stream->start_time, stream->time_base);
 }
 
 DecoderSize PlayerState::get_size() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     if (video_context)
         return { { static_cast<uint32_t>(video_context->width), static_cast<uint32_t>(video_context->height) } };
 
@@ -62,11 +65,13 @@ DecoderSize PlayerState::get_size() {
 }
 
 void PlayerState::pop_video() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     switch_video(videos_queue.front());
     videos_queue.pop();
 }
 
 void PlayerState::free_video() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     if (video_context)
         avcodec_free_context(&video_context);
 
@@ -92,6 +97,7 @@ void PlayerState::free_video() {
 }
 
 void PlayerState::switch_video(const std::string &path) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     free_video();
     video_playing = path;
 
@@ -158,6 +164,7 @@ bool PlayerState::next_packet(int32_t stream_id) {
 }
 
 std::vector<int16_t> PlayerState::receive_audio() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     if (audio_stream_id < 0)
         return {};
 
@@ -211,6 +218,7 @@ std::vector<int16_t> PlayerState::receive_audio() {
 }
 
 std::vector<uint8_t> PlayerState::receive_video() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     if (video_stream_id < 0)
         return {};
 
@@ -252,6 +260,7 @@ std::vector<uint8_t> PlayerState::receive_video() {
 }
 
 void PlayerState::queue(const std::string &path) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     if (fs::exists(path)) {
         LOG_INFO("Queued video: '{}'.", path);
         if (video_playing.empty())
