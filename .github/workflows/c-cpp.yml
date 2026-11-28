@@ -11,7 +11,6 @@ on:
 env:
   BUILD_CONFIG: Release
   QT_VERSION: '6.11.0'
-  SCCACHE_GHA_ENABLED: "true"
   # The VitaAutotests commit to test with. Bump it to pick up new tests.
   AUTOTESTS_REF: 4b4c403992b5b4cd8923d903f04f91a3cd678e1d
 
@@ -101,10 +100,18 @@ jobs:
           arch: ${{ matrix.arch }}
         if: matrix.platform == 'windows-x64'
 
-      - uses: mozilla-actions/sccache-action@v0.0.11
+      - name: Install ccache (Windows MSVC)
+        shell: bash
+        run: |
+          version=4.14.1
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/ccache.zip" "https://github.com/ccache/ccache/releases/download/v$version/ccache-$version-windows-x86_64.zip"
+          echo "6219f3865ca59aec41ee4b678df171d5d35855ecb2b6dbbbd20690b3a68af7b4 *$RUNNER_TEMP/ccache.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/ccache.zip" -d "$RUNNER_TEMP"
+          cygpath -w "$RUNNER_TEMP/ccache-$version-windows-x86_64" >> "$GITHUB_PATH"
+          # Inside the vcpkg binary cache, so the one cache step restores and saves both
+          echo 'CCACHE_DIR=${{ matrix.cache_path }}\ccache' >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=2G" >> "$GITHUB_ENV"
         if: matrix.platform == 'windows-x64'
-        with:
-          disable_annotations: true
 
       - name: Set up MSYS2 (Windows ARM)
         uses: msys2/setup-msys2@v2
@@ -132,7 +139,7 @@ jobs:
 
       - name: Reset ccache statistics
         run: ccache -z
-        if: startsWith(matrix.platform, 'linux-') || startsWith(matrix.platform, 'macos-')
+        if: matrix.platform != 'windows-arm64'
 
       - name: Install Qt 6.11.0 (Windows MSVC)
         uses: jurplel/install-qt-action@v4
@@ -200,11 +207,7 @@ jobs:
 
       - name: Print ccache statistics
         run: ccache -s
-        if: startsWith(matrix.platform, 'linux-') || startsWith(matrix.platform, 'macos-')
-
-      - name: Print sccache statistics
-        run: sccache --show-stats
-        if: matrix.platform == 'windows-x64'
+        if: matrix.platform != 'windows-arm64'
 
       - name: Upload desktop artifact
         uses: actions/upload-artifact@v7

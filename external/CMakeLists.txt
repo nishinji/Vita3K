@@ -136,6 +136,35 @@ if(MSVC)
 	endif()
 endif()
 
+# Without precompiled headers, for a compiler cache: dynarmic leaves some includes to its precompiled header,
+# so include its headers directly
+if(CMAKE_DISABLE_PRECOMPILE_HEADERS)
+	if(MSVC)
+		# /Zi makes every compile write one shared PDB, which a compiler cache cannot store
+		foreach(target mcl dynarmic)
+			get_target_property(target_options ${target} COMPILE_OPTIONS)
+			if(target_options)
+				list(TRANSFORM target_options REPLACE "^/Zi$" "/Z7")
+				set_property(TARGET ${target} PROPERTY COMPILE_OPTIONS ${target_options})
+			endif()
+		endforeach()
+	endif()
+
+	if(ARCHITECTURE STREQUAL "x86_64")
+		set(dynarmic_pch_headers xbyak/xbyak.h)
+	elseif(ARCHITECTURE STREQUAL "arm64")
+		set(dynarmic_pch_headers oaknut/oaknut.hpp)
+	endif()
+	list(APPEND dynarmic_pch_headers "${CMAKE_CURRENT_SOURCE_DIR}/dynarmic/src/dynarmic/ir/ir_emitter.h")
+	foreach(header IN LISTS dynarmic_pch_headers)
+		if(MSVC)
+			target_compile_options(dynarmic PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:/FI${header}>")
+		else()
+			target_compile_options(dynarmic PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include ${header}>")
+		endif()
+	endforeach()
+endif()
+
 add_library(vita-toolchain INTERFACE)
 target_include_directories(vita-toolchain INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/vita-toolchain/src")
 
