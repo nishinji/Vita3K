@@ -29,6 +29,16 @@ static constexpr std::uint64_t CASTED_UNUSED_TEXTURE_PURGE_SECS = 40;
 
 void generate_surface_mipmaps(GLuint texture, float res_multiplier) {
     glBindTexture(GL_TEXTURE_2D, texture);
+
+    // An sRGB surface given a mipmapped filter with a clamped last level samples as black on AMD
+    // (Killzone: Mercenary's menus), so its sampling state is left alone
+    GLint internal_format = 0;
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &internal_format);
+    if (internal_format == GL_SRGB8_ALPHA8) {
+        glGenerateMipmap(GL_TEXTURE_2D);
+        return;
+    }
+
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, static_cast<GLint>(std::ceil(std::log2(res_multiplier))));
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glGenerateMipmap(GL_TEXTURE_2D);
