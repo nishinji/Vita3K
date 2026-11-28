@@ -47,6 +47,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--expectations", type=Path, help="file with the expected outcome of every test")
     parser.add_argument("--jobs", "-j", type=int, default=1, help="how many tests to run at once, 1 by default")
+    parser.add_argument("--shard", metavar="I/N", help="run only the Ith of N equal parts of the tests")
     parser.add_argument("checkout", type=Path, help="VitaAutotests checkout with its vpk built in build/")
     parser.add_argument("names", nargs="*", help="tests to run, all of them by default")
     args = parser.parse_args()
@@ -70,6 +71,8 @@ def main() -> int:
     if args.expectations:
         pytest_args.append(f"--expectations={args.expectations.resolve()}")
     pytest_args += [f"--autotest={name}" for name in args.names]
+    if args.shard:
+        pytest_args.append(f"--shard={args.shard}")
     if args.jobs > 1:
         if importlib.util.find_spec("xdist") is None:
             raise SystemExit("--jobs above 1 needs pytest-xdist")

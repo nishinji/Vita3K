@@ -233,11 +233,16 @@ jobs:
     steps: *desktop-build-steps
 
   autotests:
-    name: VitaAutotests (linux-x64)
+    name: VitaAutotests (linux-x64, ${{ matrix.shard }})
     # Its own job, so a runner lost during the tests doesn't fail the build, and a rerun of the tests
-    # doesn't build again
+    # doesn't build again. Two jobs, each with half of the tests, since the tests are the longest part.
     needs: linux-x64-build
     runs-on: ubuntu-26.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ['1/2', '2/2']
 
     steps:
       - uses: actions/checkout@v7
@@ -277,6 +282,8 @@ jobs:
 
       # An artifact doesn't keep the executable bit
       - name: Run the autotests
+        env:
+          SHARD: ${{ matrix.shard }}
         run: |
           chmod +x vita3k/bin/Vita3K
           bash ./.ci/run-autotests.sh vita3k/bin/Vita3K autotests

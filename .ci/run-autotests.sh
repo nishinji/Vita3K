@@ -2,6 +2,7 @@
 # Runs the VitaAutotests vpk, built by build-autotests.sh, headless on a Linux build of Vita3K, with
 # Vulkan on lavapipe, Mesa's CPU driver.
 # Usage: run-autotests.sh <Vita3K binary> <VitaAutotests checkout>
+# SHARD, like 1/2, runs only that part of the tests.
 set -euo pipefail
 
 VITA3K="$(realpath "$1")"
@@ -19,4 +20,4 @@ export VK_DRIVER_FILES="$lavapipe_icd" VK_ICD_FILENAMES="$lavapipe_icd"
 
 # Four tests at once, one per core of the runner. The system python, where apt put pytest, since the
 # setup-python of install-qt-action puts its own first on PATH.
-/usr/bin/python3 "$TOOLS_DIR/run.py" --jobs 4 --expectations "$TOOLS_DIR/expectations.txt" "$AUTOTESTS_DIR"
+/usr/bin/python3 "$TOOLS_DIR/run.py" --jobs 4 --expectations "$TOOLS_DIR/expectations.txt" ${SHARD:+--shard "$SHARD"} "$AUTOTESTS_DIR"

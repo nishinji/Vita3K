@@ -14,6 +14,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     group.addoption("--checkout", type=Path, help="VitaAutotests checkout with its vpk built in build/")
     group.addoption("--expectations", type=Path, help="file with the expected outcome of every test, all pass without one")
     group.addoption("--autotest", action="append", default=[], metavar="NAME", help="a test to run, all of them by default, can be given more than once")
+    group.addoption("--shard", metavar="I/N", help="run only the Ith of N equal parts of the tests, to split a run over several machines")
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -32,6 +33,15 @@ def pytest_configure(config: pytest.Config) -> None:
     unknown = [name for name in names if name not in tests]
     if unknown:
         raise pytest.UsageError(f"not tests: {', '.join(unknown)}")
+    if shard := config.getoption("shard"):
+        try:
+            index, count = map(int, shard.split("/"))
+        except ValueError:
+            index = count = 0
+        if not 1 <= index <= count:
+            raise pytest.UsageError(f"--shard is I/N with 1 <= I <= N, not {shard}")
+        # Every Nth test, so the slow ones of a family spread over the shards
+        names = names[index - 1::count]
     path = config.getoption("expectations")
     expectations = load_expectations(path, tests) if path else dict.fromkeys(tests, ("pass", ""))
     config.stash[SUITE] = (checkout, tests, {name: expectations[name] for name in names})
